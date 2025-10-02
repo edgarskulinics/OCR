@@ -3,6 +3,9 @@ import threading
 import json
 import tempfile
 import smtplib
+import threading
+import time
+import io
 import winreg
 from email.mime.multipart import MIMEMultipart
 from email.mime.base import MIMEBase
@@ -15,13 +18,45 @@ from tkinter import filedialog, messagebox, Toplevel, Scale, HORIZONTAL, VERTICA
 import ttkbootstrap as ttk
 from ttkbootstrap.constants import *
 from reportlab.pdfgen import canvas
+from PIL import Image, ImageEnhance, ImageOps, ImageTk, ImageFilter, ImageDraw, ImageFont, ImageChops
+import pytesseract
+import tkinter as tk
+from tkinter import filedialog, messagebox, Toplevel, Scale, HORIZONTAL, VERTICAL, ttk, simpledialog
+import ttkbootstrap as ttk
+from ttkbootstrap.constants import *
+from reportlab.pdfgen import canvas
+# JAUNS IMPORTS PRIEKŠ IKONĀM UN PAPILDU FUNKCIONALITĀTES
+import os
+import qrcode
+import numpy as np
+import cv2
+import sys
+import urllib.parse
+from docx import Document
+from docx.shared import Inches
+import time
+import pypdf
+import fitz
+from watchdog.observers import Observer
+from watchdog.events import FileSystemEventHandler
+from scan_settings_window import ScanSettingsWindow
+import random
 from reportlab.lib.utils import ImageReader
 from reportlab.lib.pagesizes import A4, letter, landscape, portrait
 from reportlab.lib.units import inch
 import uuid
 import qrcode
 import datetime
+import tkinter as tk
+from tkinter import ttk, messagebox
+import calendar
+from datetime import datetime
+from ttkbootstrap import Window
 import subprocess
+import uuid
+import qrcode
+from reportlab.graphics.barcode import code128, code39, eanbc
+from reportlab.lib.units import mm
 from tkcalendar import Calendar
 import numpy as np
 import cv2
@@ -30,12 +65,42 @@ import urllib.parse
 from docx import Document
 from docx.shared import Inches
 import time  # Added for camera scanning stability
-import pypdf # For PDF encryption
-import fitz # PyMuPDF for PDF to image conversion
+import pypdf  # For PDF encryption
+import fitz  # PyMuPDF for PDF to image conversion
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
-from scan_settings_window import ScanSettingsWindow # JAUNS IMPORTS
+from scan_settings_window import ScanSettingsWindow  # JAUNS IMPORTS
 import random  # Pievienots random modulis
+
+
+def save_user_file(file_path, content=None, mode='w'):
+    """Palīgfuncija failu saglabāšanai"""
+    try:
+        if content is None:
+            # Ja nav satura, vienkārši izveido tukšu failu
+            with open(file_path, mode, encoding='utf-8') as f:
+                pass
+        else:
+            with open(file_path, mode, encoding='utf-8') as f:
+                if isinstance(content, (str, bytes)):
+                    f.write(content)
+                else:
+                    f.write(str(content))
+        return True
+    except Exception as e:
+        print(f"Kļūda saglabājot failu {file_path}: {e}")
+        return False
+
+
+def load_user_file(file_path, mode='r'):
+    """Palīgfuncija failu ielādei"""
+    try:
+        with open(file_path, mode, encoding='utf-8') as f:
+            return f.read()
+    except Exception as e:
+        print(f"Kļūda ielādējot failu {file_path}: {e}")
+        return None
+
 
 def show_loading_screen(root):
     """Parāda premium ielādes logu ar modernu dizainu"""
@@ -148,7 +213,6 @@ def show_loading_screen(root):
 
     return loading_window
 
-
     # Centrēšana
     loading_window.update_idletasks()
     width = loading_window.winfo_width()
@@ -240,7 +304,6 @@ def show_loading_screen(root):
     return loading_window
 
 
-
 def register_file_association():
     """Reģistrē .pdf failu asociāciju ar šo programmu"""
     try:
@@ -263,6 +326,7 @@ def register_file_association():
     except Exception as e:
         messagebox.showerror("Kļūda", f"Neizdevās reģistrēt asociācijas:\n{e}")
 
+
 # Pārbauda un importē OpenCV un NumPy slīpuma korekcijai
 OPENCV_AVAILABLE = False
 try:
@@ -275,7 +339,42 @@ except ImportError:
         "OpenCV and NumPy not found. Deskew, HSV conversion, stitching, inpainting, face detection, and camera scanning functionality will be disabled.")
 
 # Tesseract ceļš - pielāgo savam datoram
-DEFAULT_TESSERACT_CMD = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+import sys
+import os
+
+
+# Funkcija, lai iegūtu resursu ceļu, neatkarīgi no tā, vai programma darbojas kā .exe vai Python skripts
+def resource_path(relative_path):
+    """ Get absolute path to resource, works for dev and for PyInstaller """
+    try:
+        # PyInstaller creates a temp folder and stores path in _MEIPASS
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.abspath(".")
+    return os.path.join(base_path, relative_path)
+
+
+# Noklusējuma Tesseract ceļš. Pieņemam, ka tesseract.exe atradīsies mapē "Tesseract-OCR" blakus EXE.
+# Ja tesseract.exe ir tieši blakus EXE, tad vienkārši "tesseract.exe"
+# Tesseract konfigurācija portatīvajai versijai
+DEFAULT_TESSERACT_CMD = resource_path(os.path.join("Tesseract-OCR", "tesseract.exe"))
+
+
+# Konfigurē pytesseract, lai izmantotu portatīvo Tesseract
+def configure_tesseract():
+    """Konfigurē Tesseract portatīvajai izmantošanai"""
+    tesseract_path = resource_path(os.path.join("Tesseract-OCR", "tesseract.exe"))
+    tessdata_path = resource_path(os.path.join("Tesseract-OCR", "tessdata"))
+
+    # Iestatām Tesseract ceļu
+    pytesseract.pytesseract.tesseract_cmd = tesseract_path
+
+    # Iestatām TESSDATA_PREFIX vides mainīgo
+    os.environ['TESSDATA_PREFIX'] = tessdata_path
+
+    return tesseract_path, tessdata_path
+
+
 pytesseract.pytesseract.tesseract_cmd = DEFAULT_TESSERACT_CMD
 
 # Definējiet ceļu uz iestatījumu failu
@@ -285,14 +384,13 @@ APP_SETTINGS_FILE = "app_settings.json"  # Varat mainīt uz citu ceļu, ja nepie
 DEFAULT_CAMERA_INDEX = 1
 
 
-
 class SettingsWindow(Toplevel):
     """Paplašināta iestatījumu klase ar e-pasta iestatījumiem un skenēšanas iestatījumiem"""
 
     def __init__(self, master, app_instance):
         super().__init__(master)
         self.app = app_instance
-        self.title("Vispārīgie Iestatījumi") # MAINĪTS TEKSTS
+        self.title("Vispārīgie Iestatījumi")  # MAINĪTS TEKSTS
         # Pielāgo iestatījumu loga izmēru, lai tas labāk ietilptu mazākos ekrānos
         # Var izmantot arī relatīvus izmērus, piemēram, 80% no galvenā loga izmēra
         self.geometry("1000x900")  # Palielināts iestatījumu loga izmērs
@@ -309,6 +407,216 @@ class SettingsWindow(Toplevel):
             self.id_code_options_frame.grid()
         else:
             self.id_code_options_frame.grid_remove()
+
+    def init_camera(self, force_camera_index=None):
+        """Kameras inicializācija ar konkrētu kameras indeksu."""
+        if not OPENCV_AVAILABLE:
+            messagebox.showwarning("Trūkst bibliotēkas", "Nepieciešams opencv-python.")
+            return False
+
+        # Ja kamera jau ir atvērta un nav pieprasīta konkrēta kamera
+        if self.camera is not None and force_camera_index is None:
+            return True
+
+        # Atbrīvo esošo kameru, ja vajag mainīt
+        if self.camera is not None:
+            self.camera.release()
+            self.camera = None
+            self.camera_active = False
+
+        try:
+            # Nosaka kameras indeksu
+            if force_camera_index is not None:
+                camera_index = force_camera_index
+                print(f"🎯 Piespiedu kārtā izmanto kameru: {camera_index}")
+            elif hasattr(self, 'scan_camera_index'):
+                camera_index = self.scan_camera_index.get()
+                print(f"📋 Iestatījumos norādītā kamera: {camera_index}")
+            else:
+                camera_index = 0
+                print("⚠️ Nav atrasts scan_camera_index, izmanto 0")
+
+            print(f"🔍 Mēģina atvērt kameru {camera_index}")
+
+            # Atver norādīto kameru
+            self.camera = cv2.VideoCapture(camera_index)
+            if not self.camera.isOpened():
+                print(f"❌ Kamera {camera_index} nav pieejama")
+                raise IOError(f"Kamera {camera_index} nav pieejama")
+
+            print(f"✅ Veiksmīgi atvērta kamera {camera_index}")
+
+            # Iestata kvalitāti
+            self.camera.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
+            self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
+            self.camera.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+
+            # Saglabā pašreizējo kameras indeksu
+            self.current_camera_index = camera_index
+
+            actual_width = int(self.camera.get(cv2.CAP_PROP_FRAME_WIDTH))
+            actual_height = int(self.camera.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            print(f"📐 Kamera {camera_index}: {actual_width}x{actual_height}")
+
+            self.camera_active = True
+            return True
+
+        except Exception as e:
+            print(f"❌ Kameras {camera_index} kļūda: {e}")
+            messagebox.showerror("Kameras kļūda", f"Nevar atvērt kameru {camera_index}: {e}")
+            if self.camera:
+                self.camera.release()
+            self.camera = None
+            self.camera_active = False
+            return False
+
+    def release_camera(self):
+        """Atbrīvo kameras resursus."""
+        if self.camera is not None:
+            self.camera.release()
+            self.camera = None
+            self.camera_active = False
+
+    def get_camera_frame(self):
+        """Ātri iegūst kameras kadru priekšskatījumam."""
+        if self.camera is None or not self.camera_active:
+            return None
+
+        try:
+            ret, frame = self.camera.read()
+            if not ret:
+                return None
+
+            # Samazina tikai priekšskatījumam (ātrāk)
+            height, width = frame.shape[:2]
+            if width > 800:  # Samazina tikai ja pārāk liels
+                scale = 800 / width
+                new_width = int(width * scale)
+                new_height = int(height * scale)
+                frame = cv2.resize(frame, (new_width, new_height), interpolation=cv2.INTER_LINEAR)
+
+            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            return Image.fromarray(frame_rgb)
+        except Exception as e:
+            print(f"Kadra kļūda: {e}")
+            return None
+
+    def _select_folder_dialog(self, root_folder):
+        """Atver dialogu mapju izvēlei."""
+        dialog = Toplevel(self)
+        dialog.title("Izvēlieties mērķa mapi")
+        dialog.geometry("400x300")
+        dialog.transient(self)
+        dialog.grab_set()
+
+        selected_folder = [None]  # Izmanto sarakstu, lai varētu mainīt no nested funkcijas
+
+        # Treeview mapju attēlošanai
+        tree = ttk.Treeview(dialog)
+        tree.pack(fill="both", expand=True, padx=10, pady=10)
+
+        def populate_tree(parent_item, folder_node):
+            """Rekursīvi aizpilda koku ar mapēm."""
+            for item in folder_node.get("contents", []):
+                if item["type"] == "folder":
+                    item_id = tree.insert(parent_item, "end", text=item["name"], values=[id(item)])
+                    populate_tree(item_id, item)
+
+        # Aizpilda koku
+        root_id = tree.insert("", "end", text="Sakne", values=[id(root_folder)])
+        populate_tree(root_id, root_folder)
+        tree.item(root_id, open=True)
+
+        def on_select():
+            selection = tree.selection()
+            if selection:
+                item_id = selection[0]
+                folder_id = tree.item(item_id, "values")[0]
+                # Atrod mapi pēc ID
+                selected_folder[0] = find_folder_by_id(root_folder, int(folder_id))
+            dialog.destroy()
+
+        def find_folder_by_id(folder, target_id):
+            """Atrod mapi pēc ID."""
+            if id(folder) == target_id:
+                return folder
+            for item in folder.get("contents", []):
+                if item["type"] == "folder":
+                    result = find_folder_by_id(item, target_id)
+                    if result:
+                        return result
+            return None
+
+        # Pogas
+        button_frame = ttk.Frame(dialog)
+        button_frame.pack(fill="x", padx=10, pady=5)
+
+        ttk.Button(button_frame, text="Izvēlēties", command=on_select).pack(side="right", padx=5)
+        ttk.Button(button_frame, text="Atcelt", command=dialog.destroy).pack(side="right")
+
+        dialog.wait_window()
+        return selected_folder[0]
+
+    def _is_descendant(self, potential_ancestor, potential_descendant):
+        """Pārbauda, vai potential_descendant ir potential_ancestor apakšmape."""
+        current = potential_ancestor
+        while current:
+            if current == potential_descendant:
+                return True
+            current = current.get("parent")
+        return False
+
+    def save_as_word(self):
+        """Saglabā atlasīto PDF kā Word dokumentu."""
+        selection = self.pdf_listbox.curselection()
+        if not selection:
+            messagebox.showwarning("Nav atlasīts", "Lūdzu, atlasiet PDF failu.")
+            return
+
+        try:
+            # Vienkārša implementācija - var uzlabot
+            messagebox.showinfo("Funkcija", "Word eksportēšana vēl nav pilnībā implementēta.")
+        except Exception as e:
+            messagebox.showerror("Kļūda", f"Neizdevās saglabāt kā Word: {e}")
+
+    def drag_start(self, event):
+        """Sāk drag operāciju."""
+        self.drag_data["x"] = event.x
+        self.drag_data["y"] = event.y
+        self.drag_data["item"] = self.pdf_listbox.nearest(event.y)
+
+    def drag_motion(self, event):
+        """Apstrādā vilkšanas kustību `pdf_listbox`."""
+        if self.drag_data["item_index"] is not None:
+            # Iegūst jauno pozīciju
+            new_index = self.pdf_listbox.nearest(event.y)
+            current_index = self.drag_data["item_index"]
+
+            if new_index != current_index:
+                # Pārvieto elementu pamatā esošajā datu struktūrā
+                item_to_move = self.current_folder["contents"].pop(current_index)
+                self.current_folder["contents"].insert(new_index, item_to_move)
+
+                # Atjaunina vilkšanas datus ar jauno indeksu
+                self.drag_data["item_index"] = new_index
+
+                # Atjauno listbox vizuālo attēlojumu
+                self.refresh_pdf_list()
+                # Pārliecinās, ka pārvietotais elements joprojām ir atlasīts
+                self.pdf_listbox.selection_set(new_index)
+                self.pdf_listbox.activate(new_index)
+
+    def drag_drop(self, event):
+        """Beidz drag operāciju."""
+        target_index = self.pdf_listbox.nearest(event.y)
+        source_index = self.drag_data["item"]
+
+        if source_index != target_index and 0 <= target_index < len(self.current_folder["contents"]):
+            # Pārvieto elementu sarakstā
+            item = self.current_folder["contents"].pop(source_index)
+            self.current_folder["contents"].insert(target_index, item)
+            self.refresh_pdf_list()
+
 
     def create_widgets(self):
         """Izveido iestatījumu loga elementus"""
@@ -350,7 +658,6 @@ class SettingsWindow(Toplevel):
                    bootstyle=PRIMARY).pack(side=RIGHT, padx=5)
         ttk.Button(button_frame, text="Atcelt", command=self.destroy,
                    bootstyle=SECONDARY).pack(side=RIGHT, padx=5)
-
 
     def create_general_settings(self, frame):
         """Izveido vispārīgos iestatījumus"""
@@ -530,7 +837,6 @@ class SettingsWindow(Toplevel):
 
         frame.columnconfigure(1, weight=1)
 
-
     def test_email_settings(self):
         """Pārbauda e-pasta savienojumu ar norādītajiem iestatījumiem"""
         try:
@@ -608,7 +914,7 @@ class SettingsWindow(Toplevel):
         self.add_id_code_var.set(self.app.settings.get("add_id_code_to_pdf", False))
         self.id_code_type_var.set(self.app.settings.get("id_code_type", "QR"))
         self.id_code_position_var.set(self.app.settings.get("id_code_position", "bottom_right"))
-        self.toggle_id_code_options() # Atjaunina redzamību
+        self.toggle_id_code_options()  # Atjaunina redzamību
 
         for lang_name, var in self.lang_vars.items():
             if lang_name in self.app.lang_vars:
@@ -629,6 +935,11 @@ class SettingsWindow(Toplevel):
         self.app.pdf_quality = self.pdf_qual_var.get()
         self.app.orientation_var.set(self.page_size_var.get())
         self.app.fontsize_var.set(self.font_size_var.get())
+
+        self.app.scan_camera_index.set(self.camera_index_var.get())
+        self.app.scan_camera_width.set(self.camera_width_var.get())
+        self.app.scan_camera_height.set(self.camera_height_var.get())
+        self.app.scan_min_contour_area.set(self.min_contour_area_var.get())
 
         # E-pasta iestatījumi
         self.app.settings["smtp_server"] = self.smtp_server_var.get()
@@ -665,6 +976,7 @@ class SettingsWindow(Toplevel):
         self.dpi_var = tk.IntVar(value=300)  # Noklusējuma DPI
         ttk.Label(params_frame, text="DPI:").grid(row=0, column=0, sticky=tk.W)
         ttk.Spinbox(params_frame, from_=70, to=600, increment=10, textvariable=self.dpi_var, width=4).grid(row=0,
+
                                                                                                            column=1)
         # Pievienojiet citus komponentus šeit
 
@@ -738,15 +1050,6 @@ class FullscreenImageViewer(Toplevel):
         self.selection_rect = None
         self.selection_start_x = None
         self.selection_start_y = None
-
-        self.file_listbox = tk.Listbox(self)  # Inicializē file_listbox
-        self.file_listbox.bind('<<ListboxSelect>>', self.on_file_select)
-
-        # Konfigurē krāsas
-        self.file_listbox.configure(
-            selectbackground='#d4edda',  # Zaļa atlases krāsa
-            selectforeground='white'
-        )
 
         self.display_image()
 
@@ -827,7 +1130,2220 @@ class FullscreenImageViewer(Toplevel):
         pass
 
 
-class OCRPDFApp(ttk.Window):
+class DocumentScanner:
+    def __init__(self, app_instance):
+        self.app = app_instance
+        self.image_to_process = None
+        self.original_image_pil = None
+        self.processed_image_pil = None
+        self.corners = []
+        self.preview_window = None
+        self.canvas = None
+        self.photo_image = None
+        self.corner_handles = []
+        self.active_handle = None
+        self.zoom_factor = 1.0
+        self.pan_x = 0
+        self.pan_y = 0
+        self.start_pan_x = 0
+        self.start_pan_y = 0
+
+        # Reāllaika skenēšanas mainīgie
+        self.live_scan_active = False
+        self.live_scan_button = None
+        self.save_auto_button = None
+        self.live_detected_corners = []
+        self.scan_job = None
+        self.color_picker_mode = False
+
+        # Auto-adjust mainīgie
+        self.auto_adjust_active = False
+        self.auto_adjust_button = None
+        self.auto_adjust_job = None
+        self.auto_adjust_progress_label = None
+        self.live_scan_was_active_before_auto = False
+        # PIEVIENO ŠĪS RINDAS:
+        self.settings_history = []  # Iestatījumu vēsture
+        self.history_listbox = None
+        self.load_history_button = None
+        self.delete_history_button = None
+
+        # Automātiskās pielāgošanas mainīgie
+        self.auto_adjust_active = False
+        self.auto_adjust_job = None
+        self.best_score = -1.0
+        self.best_settings = {
+            "brightness": 0,
+            "contrast": 0,
+            "gamma": 1.0
+        }
+        self.current_search_step = 0
+        self.search_space = {
+            "brightness": list(range(-100, 101, 10)),
+            "contrast": [100],  # FIKSĒTS UZ 100
+            "gamma": [round(x * 0.01, 2) for x in range(96, 151, 5)]  # 0.96..1.50 pa 0.05
+        }
+        self.search_combinations = []
+        self.current_combination_index = 0
+
+        # Reāllaika skenēšanas mainīgie
+        self.live_scan_active = False
+
+    def set_image(self, pil_image):
+        self.original_image_pil = pil_image.copy()
+        self.image_to_process = pil_image.copy()
+        self.processed_image_pil = pil_image.copy()
+        self.corners = []  # Reset corners for new image
+
+    def toggle_fullscreen(self):
+        """Pārslēdz starp pilnekrāna un parasto režīmu."""
+        if hasattr(self, 'preview_window') and self.preview_window:
+            current_state = self.preview_window.attributes('-fullscreen')
+            self.preview_window.attributes('-fullscreen', not current_state)
+
+            if not current_state:  # Ja ieslēdzam fullscreen
+                self.preview_window.attributes('-topmost', True)
+            else:  # Ja izslēdzam fullscreen
+                self.preview_window.attributes('-topmost', False)
+                self.preview_window.state('zoomed')  # Windows maximized
+
+    def on_camera_change(self, event=None):
+        """Apstrādā kameras maiņu dropdown."""
+        try:
+            new_camera_index = self.camera_var.get()
+            current_index = getattr(self.app, 'current_camera_index', 0)
+
+            if new_camera_index != current_index:
+                print(f"🔄 Maina kameru no {current_index} uz {new_camera_index}")
+
+                # Aptur skenēšanu
+                was_scanning = self.live_scan_active
+                if was_scanning:
+                    self.stop_live_scan()
+
+                # Maina kameru
+                if self.app.init_camera(force_camera_index=new_camera_index):
+                    print(f"✅ Kamera nomainīta uz {new_camera_index}")
+
+                    # Atsāk skenēšanu ar jauno kameru
+                    if was_scanning:
+                        self.document_frozen = False
+                        self.live_detected_corners = []
+                        if self.save_auto_button:
+                            self.save_auto_button.config(state="disabled", text="🔍 Meklē dokumentu...")
+                        self.start_live_scan()
+                else:
+                    # Ja neizdevās, atgriež veco vērtību
+                    self.camera_var.set(current_index)
+                    messagebox.showerror("Kļūda", f"Neizdevās atvērt kameru {new_camera_index}")
+
+        except Exception as e:
+            print(f"Kameras maiņas kļūda: {e}")
+            messagebox.showerror("Kļūda", f"Kameras maiņas kļūda: {e}")
+
+    def capture_and_process_frame(self):
+        """Saglabā pašreizējo dokumentu un jautā par turpināšanu."""
+        if self.original_image_pil is None or not self.live_detected_corners:
+            messagebox.showwarning("Nav attēla", "Nav atrasts dokuments, ko saglabāt.")
+            return
+
+        try:
+            # Aptur skenēšanu uz laiku
+            self.stop_live_scan()
+
+            # Iegūst AUGSTAS KVALITĀTES kadru saglabāšanai
+            hq_frame = self.app.get_camera_frame_hq()
+            if hq_frame is None:
+                # Ja neizdevās iegūt HQ, izmanto esošo
+                hq_frame = self.original_image_pil
+
+            print(f"📸 Saglabā HQ attēlu: {hq_frame.size}")
+
+            # Pielieto dokumenta korekciju uz HQ attēlu
+            img_cv = np.array(hq_frame.convert("RGB"))
+            img_cv = cv2.cvtColor(img_cv, cv2.COLOR_RGB2BGR)
+
+            # Pārrēķina stūrus HQ attēlam
+            if hq_frame.size != self.original_image_pil.size:
+                # Mērogošanas koeficients
+                scale_x = hq_frame.size[0] / self.original_image_pil.size[0]
+                scale_y = hq_frame.size[1] / self.original_image_pil.size[1]
+
+                # Mērogoti stūri HQ attēlam
+                hq_corners = self.live_detected_corners.copy()
+                hq_corners[:, 0] *= scale_x
+                hq_corners[:, 1] *= scale_y
+            else:
+                hq_corners = self.live_detected_corners
+
+            warped_cv = self.four_point_transform(img_cv, hq_corners)
+            processed_image_pil = Image.fromarray(cv2.cvtColor(warped_cv, cv2.COLOR_BGR2RGB))
+
+            # Pievieno attēlu sarakstam
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            image_name = f"Skenēts_dokuments_{timestamp}"
+
+            self.app.images.append({
+                "filepath": f"camera_scan_{timestamp}",
+                "original_img": processed_image_pil.copy(),
+                "processed_img": processed_image_pil.copy()
+            })
+            self.app.ocr_results.append(None)
+            self.app.file_listbox.insert(tk.END, image_name)
+            self.app.refresh_file_listbox()
+
+            # Saglabāt pašreizējā loga atsauci
+            current_window = self.preview_window
+
+            # Jautā par turpināšanu ar kvalitātes info
+            quality_info = f"Kvalitāte: {processed_image_pil.size[0]}x{processed_image_pil.size[1]}"
+            response = messagebox.askyesno("Dokuments saglabāts",
+                                           f"Dokuments '{image_name}' pievienots sarakstam!\n{quality_info}\n\nVai vēlaties skenēt vēl vienu dokumentu?")
+
+            if response:
+                # Novērst loga dubultu aizvēršanu
+                self.preview_window = None
+
+                # Atver jauno logu PIRMS vecā aizvēršanas
+                self.app.scan_document_with_camera_fast()
+
+                # Aizvērt veco logu BEZ kameras atbrīvošanas
+                if current_window:
+                    try:
+                        current_window.unbind('<Return>')
+                        current_window.unbind('<r>')
+                        current_window.unbind('<R>')
+                        current_window.destroy()
+                    except Exception as e:
+                        print(f"Kļūda vecā loga aizvēršanā: {e}")
+            else:
+                # Ja nevēlas turpināt, aizvērt logu un atbrīvot kameru
+                self.preview_window = current_window  # Atjauno atsauci
+                self.close_preview_window(release_camera=True)
+
+        except Exception as e:
+            messagebox.showerror("Kļūda", f"Neizdevās saglabāt dokumentu: {e}")
+            # Atsāk skenēšanu, ja bija kļūda
+            if self.preview_window:
+                self.start_live_scan()
+
+    def refresh_camera_view(self):
+        """Ātri atsvaidzina kameras skatu."""
+        try:
+            # Atiestatīt statusu
+            self.document_frozen = False
+            self.live_detected_corners = []
+
+            # Vizuāla atgriezeniskā saite
+            if self.refresh_camera_button:
+                self.refresh_camera_button.config(text="✅ Atsvaidzināts!", bootstyle="success")
+                self.preview_window.after(500, lambda: self.refresh_camera_button.config(
+                    text="📷 Atsvaidzināt", bootstyle="info") if self.refresh_camera_button else None)
+
+            # Atjaunināt pogas
+            if self.save_auto_button:
+                self.save_auto_button.config(state="disabled", text="🔍 Meklē dokumentu...")
+
+            # Iegūt jaunu kadru
+            camera_frame_pil = self.app.get_camera_frame()
+            if camera_frame_pil:
+                self.original_image_pil = camera_frame_pil.copy()
+                self.image_to_process = camera_frame_pil.copy()
+                self.display_live_scan_preview()
+
+            current_cam = getattr(self.app, 'current_camera_index', 0)
+            print(f"✅ Kamera {current_cam} atsvaidzināta!")
+
+        except Exception as e:
+            print(f"Kļūda kameras atsvaidzināšanā: {e}")
+
+    def apply_image_enhancements(self, image_pil):
+        """Pielieto attēla uzlabojumus."""
+        from PIL import ImageEnhance
+
+        enhanced = image_pil.copy()
+
+        # Spilgtums
+        brightness = 1.0 + (self.app.scan_brightness.get() / 100.0)
+        if brightness != 1.0:
+            enhancer = ImageEnhance.Brightness(enhanced)
+            enhanced = enhancer.enhance(brightness)
+
+        # Kontrasts
+        contrast = 1.0 + (self.app.scan_contrast.get() / 100.0)
+        if contrast != 1.0:
+            enhancer = ImageEnhance.Contrast(enhanced)
+            enhanced = enhancer.enhance(contrast)
+
+        # Krāsu piesātinājums
+        saturation = 1.0 + (self.app.scan_saturation.get() / 100.0)
+        if saturation != 1.0:
+            enhancer = ImageEnhance.Color(enhanced)
+            enhanced = enhancer.enhance(saturation)
+
+        # Gamma korekcija
+        gamma = self.app.scan_gamma.get()
+        if gamma != 1.0:
+            enhanced = self.apply_gamma_correction(enhanced, gamma)
+
+        return enhanced
+
+    def apply_gamma_correction(self, image_pil, gamma):
+        """Pielieto gamma korekciju."""
+        import numpy as np
+
+        # Konvertē uz numpy array
+        img_array = np.array(image_pil, dtype=np.float32) / 255.0
+
+        # Pielieto gamma korekciju
+        corrected = np.power(img_array, 1.0 / gamma)
+
+        # Konvertē atpakaļ uz PIL
+        corrected = (corrected * 255).astype(np.uint8)
+        return Image.fromarray(corrected)
+
+    def apply_color_based_detection(self, img_cv):
+        """Pielieto krāsu balstītu detekciju."""
+        if not self.app.scan_use_color_detection.get():
+            return img_cv
+
+        # Konvertē mērķa krāsu uz HSV
+        target_color_hex = self.app.scan_target_color.get()
+        target_rgb = tuple(int(target_color_hex[i:i + 2], 16) for i in (1, 3, 5))
+        target_bgr = target_rgb[::-1]  # RGB uz BGR
+        target_hsv = cv2.cvtColor(np.uint8([[target_bgr]]), cv2.COLOR_BGR2HSV)[0][0]
+
+        # Konvertē attēlu uz HSV
+        hsv = cv2.cvtColor(img_cv, cv2.COLOR_BGR2HSV)
+
+        # Definē krāsu diapazonu ar overflow aizsardzību
+        tolerance = min(self.app.scan_color_tolerance.get(), 50)  # Ierobežo tolerance
+        h_value = int(target_hsv[0])  # Konvertē uz int
+        lower_bound = np.array([max(0, h_value - tolerance), 50, 50], dtype=np.uint8)
+        upper_bound = np.array([min(179, h_value + tolerance), 255, 255], dtype=np.uint8)
+
+        # Izveido masku
+        mask = cv2.inRange(hsv, lower_bound, upper_bound)
+
+        # Pielieto masku
+        result = cv2.bitwise_and(img_cv, img_cv, mask=mask)
+
+        return result
+
+    def find_document_corners_enhanced(self):
+        """Atrod dokumenta stūrus ar uzlabotu algoritmu."""
+        print("find_document_corners_enhanced izsaukts")
+
+        if not self.original_image_pil:
+            print("Nav original_image_pil")
+            return None
+        """Uzlabota dokumentu stūru atrašana ar papildu apstrādi."""
+        if self.image_to_process is None:
+            return None
+
+        # Pielieto attēla uzlabojumus
+        enhanced_image = self.apply_image_enhancements(self.image_to_process)
+
+        # Konvertē uz OpenCV formātu
+        img_cv = np.array(enhanced_image.convert("RGB"))
+        img_cv = cv2.cvtColor(img_cv, cv2.COLOR_RGB2BGR)
+
+        # Pielieto krāsu detekciju, ja ieslēgta
+        if self.app.scan_use_color_detection.get():
+            img_cv = self.apply_color_based_detection(img_cv)
+
+        # Konvertē uz pelēktoņiem
+        img_gray = cv2.cvtColor(img_cv, cv2.COLOR_BGR2GRAY)
+
+        # Gausa izplūšana
+        kernel_size = self.app.scan_gaussian_blur_kernel.get()
+        if kernel_size % 2 == 0:
+            kernel_size += 1
+        img_blur = cv2.GaussianBlur(img_gray, (kernel_size, kernel_size), 0)
+
+        # Adaptīvā sliekšņošana
+        block_size = self.app.scan_adaptive_thresh_block_size.get()
+        if block_size % 2 == 0:
+            block_size += 1
+        C = self.app.scan_adaptive_thresh_c.get()
+        img_thresh = cv2.adaptiveThreshold(img_blur, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                                           cv2.THRESH_BINARY_INV, block_size, C)
+
+        # Morfoloģiskās operācijas, ja ieslēgtas
+        if self.app.scan_morphology_enabled.get():
+            morph_kernel_size = self.app.scan_morphology_kernel_size.get()
+            kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (morph_kernel_size, morph_kernel_size))
+            img_thresh = cv2.morphologyEx(img_thresh, cv2.MORPH_CLOSE, kernel)
+
+        # Canny malu detekcija
+        canny_thresh1 = self.app.scan_canny_thresh1.get()
+        canny_thresh2 = self.app.scan_canny_thresh2.get()
+        edges = cv2.Canny(img_thresh, canny_thresh1, canny_thresh2)
+
+        # Malu paplašināšana
+        dilation_size = self.app.scan_edge_dilation.get()
+        if dilation_size > 0:
+            dilation_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (dilation_size, dilation_size))
+            edges = cv2.dilate(edges, dilation_kernel, iterations=1)
+
+        # Atrod kontūras (pārējais kods paliek tāds pats)
+        contours, _ = cv2.findContours(edges, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+        contours = sorted(contours, key=cv2.contourArea, reverse=True)
+
+        min_contour_area = self.app.scan_min_contour_area.get()
+        aspect_ratio_min = self.app.scan_aspect_ratio_min.get()
+        aspect_ratio_max = self.app.scan_aspect_ratio_max.get()
+
+        for contour in contours:
+            if cv2.contourArea(contour) < min_contour_area:
+                continue
+
+            peri = cv2.arcLength(contour, True)
+            approx = cv2.approxPolyDP(contour, 0.02 * peri, True)
+
+            if len(approx) == 4:
+                x, y, w, h = cv2.boundingRect(approx)
+                aspect_ratio = w / float(h)
+                if aspect_ratio_min < aspect_ratio < aspect_ratio_max:
+                    pts = approx.reshape(4, 2)
+                    rect = np.zeros((4, 2), dtype="float32")
+
+                    s = pts.sum(axis=1)
+                    rect[0] = pts[np.argmin(s)]
+                    rect[2] = pts[np.argmax(s)]
+
+                    diff = np.diff(pts, axis=1)
+                    rect[1] = pts[np.argmin(diff)]
+                    rect[3] = pts[np.argmax(diff)]
+
+                    self.corners = rect.tolist()
+                    return self.corners
+
+        self.corners = []
+        return None
+
+    def pick_color_from_image(self, event):
+        """Atlasa krāsu no attēla."""
+        if not self.original_image_pil or not hasattr(self, 'img_on_canvas_x'):
+            return
+
+        # Konvertē kanvasa koordinātas uz attēla koordinātām
+        canvas_x = self.canvas.canvasx(event.x)
+        canvas_y = self.canvas.canvasy(event.y)
+
+        img_x = int((canvas_x - self.img_on_canvas_x) / self.zoom_factor)
+        img_y = int((canvas_y - self.img_on_canvas_y) / self.zoom_factor)
+
+        # Pārbauda, vai koordinātas ir attēla robežās
+        img_w, img_h = self.original_image_pil.size
+        if 0 <= img_x < img_w and 0 <= img_y < img_h:
+            # Iegūst pikseļa krāsu
+            pixel_color = self.original_image_pil.getpixel((img_x, img_y))
+            if isinstance(pixel_color, int):  # Pelēktoņu attēls
+                pixel_color = (pixel_color, pixel_color, pixel_color)
+
+            # Konvertē uz hex formātu
+            hex_color = "#{:02x}{:02x}{:02x}".format(pixel_color[0], pixel_color[1], pixel_color[2])
+            self.app.scan_target_color.set(hex_color)
+
+            messagebox.showinfo("Krāsa atlasīta", f"Atlasītā krāsa: {hex_color}")
+
+            # Ja reāllaika skenēšana ir aktīva, atjauno
+            if self.live_scan_active:
+                self.display_live_scan_preview()
+
+    def create_detection_visualization_enhanced(self):
+        """Uzlabota detekcijas vizualizācija."""
+        if not self.original_image_pil:
+            return self.original_image_pil
+
+        # Pielieto attēla uzlabojumus
+        enhanced_image = self.apply_image_enhancements(self.original_image_pil)
+
+        # Konvertē uz OpenCV formātu
+        img_cv = np.array(enhanced_image.convert("RGB"))
+        img_cv = cv2.cvtColor(img_cv, cv2.COLOR_RGB2BGR)
+
+        # Pielieto krāsu detekciju, ja ieslēgta
+        if self.app.scan_use_color_detection.get():
+            color_detected = self.apply_color_based_detection(img_cv.copy())
+            # Parāda krāsu detekcijas rezultātu kā overlay
+            img_cv = cv2.addWeighted(img_cv, 0.7, color_detected, 0.3, 0)
+
+        # Pārējā detekcijas loģika...
+        img_gray = cv2.cvtColor(img_cv, cv2.COLOR_BGR2GRAY)
+
+        kernel_size = self.app.scan_gaussian_blur_kernel.get()
+        if kernel_size % 2 == 0:
+            kernel_size += 1
+        img_blur = cv2.GaussianBlur(img_gray, (kernel_size, kernel_size), 0)
+
+        block_size = self.app.scan_adaptive_thresh_block_size.get()
+        if block_size % 2 == 0:
+            block_size += 1
+        C = self.app.scan_adaptive_thresh_c.get()
+        img_thresh = cv2.adaptiveThreshold(img_blur, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                                           cv2.THRESH_BINARY_INV, block_size, C)
+
+        if self.app.scan_morphology_enabled.get():
+            morph_kernel_size = self.app.scan_morphology_kernel_size.get()
+            kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (morph_kernel_size, morph_kernel_size))
+            img_thresh = cv2.morphologyEx(img_thresh, cv2.MORPH_CLOSE, kernel)
+
+        canny_thresh1 = self.app.scan_canny_thresh1.get()
+        canny_thresh2 = self.app.scan_canny_thresh2.get()
+        edges = cv2.Canny(img_thresh, canny_thresh1, canny_thresh2)
+
+        # Malu paplašināšana
+        dilation_size = self.app.scan_edge_dilation.get()
+        if dilation_size > 0:
+            dilation_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (dilation_size, dilation_size))
+            edges = cv2.dilate(edges, dilation_kernel, iterations=1)
+
+        # Kombinē oriģinālo attēlu ar malu detekciju
+        edges_colored = cv2.cvtColor(edges, cv2.COLOR_GRAY2BGR)
+        edges_colored[:, :, 0] = 0  # Noņem sarkano kanālu
+        edges_colored[:, :, 1] = edges  # Zaļais kanāls malām
+        edges_colored[:, :, 2] = 0  # Noņem zilo kanālu
+
+        # Kombinē ar uzlaboto attēlu
+        combined = cv2.addWeighted(img_cv, 0.6, edges_colored, 0.4, 0)
+
+        # Zīmē atrastos stūrus, ja tie ir
+        if self.live_detected_corners:
+            pts = np.array(self.live_detected_corners, dtype=np.int32)
+            cv2.polylines(combined, [pts], True, (0, 255, 255), 4)  # Dzeltena kontūra
+
+            # Zīmē stūru punktus ar etiķetēm
+            corner_labels = ["TL", "TR", "BR", "BL"]
+            for i, corner in enumerate(self.live_detected_corners):
+                center = tuple(map(int, corner))
+                cv2.circle(combined, center, 12, (0, 0, 255), -1)  # Sarkani punkti
+                cv2.circle(combined, center, 15, (255, 255, 255), 2)  # Balts kontūrs
+                cv2.putText(combined, corner_labels[i],
+                            (center[0] - 10, center[1] + 5),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+
+        # Parāda krāsu mērķi, ja krāsu detekcija ir ieslēgta
+        if self.app.scan_use_color_detection.get():
+            target_color_hex = self.app.scan_target_color.get()
+            target_rgb = tuple(int(target_color_hex[i:i + 2], 16) for i in (1, 3, 5))
+            target_bgr = target_rgb[::-1]
+
+            # Zīmē krāsu paraugu augšējā labajā stūrī
+            cv2.rectangle(combined, (combined.shape[1] - 80, 10),
+                          (combined.shape[1] - 10, 40), target_bgr, -1)
+            cv2.rectangle(combined, (combined.shape[1] - 80, 10),
+                          (combined.shape[1] - 10, 40), (255, 255, 255), 2)
+            cv2.putText(combined, "Target", (combined.shape[1] - 75, 55),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
+
+        # Konvertē atpakaļ uz PIL
+        combined_rgb = cv2.cvtColor(combined, cv2.COLOR_BGR2RGB)
+        return Image.fromarray(combined_rgb)
+
+    def find_document_corners(self):
+        """Atrod dokumenta stūrus (izmanto uzlaboto versiju)."""
+        return self.find_document_corners_enhanced()
+
+    def four_point_transform(self, image, pts):
+        # Obtain a consistent order of the points and unpack them
+        # individually
+        rect = np.array(pts, dtype="float32")
+        (tl, tr, br, bl) = rect
+
+        # Compute the width of the new image, which will be the
+        # maximum distance between bottom-right and bottom-left
+        # x-coordinates or the top-right and top-left x-coordinates
+        widthA = np.sqrt(((br[0] - bl[0]) ** 2) + ((br[1] - bl[1]) ** 2))
+        widthB = np.sqrt(((tr[0] - tl[0]) ** 2) + ((tr[1] - tl[1]) ** 2))
+        maxWidth = max(int(widthA), int(widthB))
+
+        # Compute the height of the new image, which will be the
+        # maximum distance between the top-right and bottom-right
+        # y-coordinates or the top-left and bottom-left y-coordinates
+        heightA = np.sqrt(((tr[0] - br[0]) ** 2) + ((tr[1] - br[1]) ** 2))
+        heightB = np.sqrt(((tl[0] - bl[0]) ** 2) + ((tl[1] - bl[1]) ** 2))
+        maxHeight = max(int(heightA), int(heightB))
+
+        # Now that we have the dimensions of the new image, construct
+        # the set of destination points to obtain a "birds eye view",
+        # (i.e. top-down view) of the image, again specifying points
+        # in the top-left, top-right, bottom-right, and bottom-left
+        # order
+        dst = np.array([
+            [0, 0],
+            [maxWidth - 1, 0],
+            [maxWidth - 1, maxHeight - 1],
+            [0, maxHeight - 1]], dtype="float32")
+
+        # Compute the perspective transform matrix and then apply it
+        M = cv2.getPerspectiveTransform(rect, dst)
+        warped = cv2.warpPerspective(image, M, (maxWidth, maxHeight))
+
+        # Return the warped image
+        return warped
+
+    def __init__(self, app_instance):
+        self.app = app_instance
+        self.image_to_process = None
+        self.original_image_pil = None
+        self.processed_image_pil = None
+        self.corners = []
+        self.preview_window = None
+        self.canvas = None
+        self.photo_image = None
+        self.corner_handles = []
+        self.active_handle = None
+        self.zoom_factor = 1.0
+        self.pan_x = 0
+        self.pan_y = 0
+        self.start_pan_x = 0
+        self.start_pan_y = 0
+
+        # PIEVIENOJIET ŠĪSRINDAS:
+        # PIEVIENOJIET ŠĪSRINDAS:
+        self.live_scan_active = False
+        self.live_scan_button = None
+        self.save_auto_button = None
+        self.live_detected_corners = []
+        self.scan_job = None
+
+        # Auto-adjust mainīgie
+        self.auto_adjust_active = False
+        self.auto_adjust_button = None
+        self.auto_adjust_job = None
+        self.auto_adjust_progress_label = None
+        self.best_score = -1.0
+        self.best_settings = {
+            "brightness": 0,
+            "contrast": 0,
+            "gamma": 1.0
+        }
+        self.current_search_step = 0
+        self.search_space = {
+            "brightness": list(range(-100, 101, 10)),
+            "contrast": list(range(-100, 101, 10)),
+            "gamma": [round(x * 0.1, 1) for x in range(5, 21, 1)]
+        }
+        self.search_combinations = []
+        self.current_combination_index = 0
+        self.color_picker_mode = False
+
+    def toggle_live_scan(self):
+        """Ieslēdz/izslēdz reāllaika skenēšanu."""
+        if not self.live_scan_active:
+            self.start_live_scan()
+        else:
+            self.stop_live_scan()
+
+    def toggle_auto_adjust(self):
+        """Ieslēdz/izslēdz automātiskās attēla pielāgošanas režīmu."""
+        # Drošības pārbaude - ja kāds lauks trūkst, inicializē
+        if not hasattr(self, 'auto_adjust_active'):
+            self.auto_adjust_active = False
+        if not hasattr(self, 'auto_adjust_job'):
+            self.auto_adjust_job = None
+        if not hasattr(self, 'best_score'):
+            self.best_score = -1.0
+        if not hasattr(self, 'best_settings'):
+            self.best_settings = {"brightness": 0, "contrast": 0, "gamma": 1.0}
+        if not hasattr(self, 'search_space'):
+            self.search_space = {
+                "brightness": list(range(-100, 101, 10)),
+                "contrast": list(range(-100, 101, 10)),
+                "gamma": [round(x * 0.1, 1) for x in range(5, 21, 1)]
+            }
+        if not hasattr(self, 'search_combinations'):
+            self.search_combinations = []
+        if not hasattr(self, 'current_combination_index'):
+            self.current_combination_index = 0
+
+        if not self.auto_adjust_active:
+            self.start_auto_adjust()
+        else:
+            self.stop_auto_adjust()
+
+    def start_auto_adjust(self):
+        """Sāk automātisko attēla pielāgošanu."""
+        if not self.original_image_pil:
+            messagebox.showwarning("Nav attēla",
+                                   "Lūdzu, vispirms ielādējiet attēlu, lai veiktu automātisko pielāgošanu.")
+            return
+
+            # Saglabāt live scan stāvokli un izslēgt to
+            self.live_scan_was_active_before_auto = self.live_scan_active
+            if self.live_scan_active:
+                self.stop_live_scan()
+
+        self.auto_adjust_active = True
+        self.auto_adjust_button.config(text="Automātiskā pielāgošana (Iesl.)", bootstyle="success")
+        self.save_auto_adjust_button.config(state="disabled")
+        self.auto_adjust_progress_label.config(text="Progress: 0%")
+
+        # Atiestatīt meklēšanas stāvokli
+        self.best_score = 0.0  # Mainīts no -1.0 uz 0.0
+        self.best_settings = {
+            "brightness": self.app.scan_brightness.get(),
+            "contrast": self.app.scan_contrast.get(),
+            "gamma": self.app.scan_gamma.get()
+        }
+        self.current_search_step = 0
+
+        # Izveidot visas iespējamās kombinācijas ar FIKSĒTU kontrastu 100
+        from itertools import product
+        fast_search_space = {
+            "brightness": list(range(-80, 81, 20)),  # -80..80 pa 20 (9 vērtības)
+            "contrast": [100],  # VIENMĒR 100!
+            "gamma": [0.96, 1.0, 1.2, 1.4, 1.6, 1.8]  # 7 vērtības
+        }
+        self.search_combinations = list(product(
+            fast_search_space["brightness"],
+            fast_search_space["contrast"],
+            fast_search_space["gamma"]
+        ))
+        self.current_combination_index = 0
+
+        # Sākt meklēšanas ciklu
+        self.auto_adjust_loop()
+
+    def stop_auto_adjust(self):
+        """Aptur automātisko attēla pielāgošanu."""
+        self.auto_adjust_active = False
+        self.auto_adjust_button.config(text="Automātiskā pielāgošana (Izsl.)", bootstyle="secondary")
+        if self.auto_adjust_job:
+            self.preview_window.after_cancel(self.auto_adjust_job)
+            self.auto_adjust_job = None
+
+        # Atjaunot slīdņus uz labākajiem atrastajiem iestatījumiem
+        self.app.scan_brightness.set(self.best_settings["brightness"])
+        self.app.scan_contrast.set(self.best_settings["contrast"])
+        self.app.scan_gamma.set(self.best_settings["gamma"])
+        self.on_realtime_change()  # Atjaunināt attēlu ar labākajiem iestatījumiem
+
+        # Automātiski ieslēgt live scan, ja tas nebija ieslēgts pirms auto-adjust
+        if not hasattr(self, 'live_scan_was_active_before_auto'):
+            self.live_scan_was_active_before_auto = False
+
+        if not self.live_scan_was_active_before_auto and not self.live_scan_active:
+            # Ja live scan nebija ieslēgts pirms auto-adjust, ieslēgt to tagad
+            self.start_live_scan()
+
+        print(f"Auto-adjust pabeigts. Labākais rezultāts: {self.best_score}")
+
+        if self.best_score is not None and self.best_score > 0.1:  # Samazināts slieksnis!
+            if hasattr(self, 'save_auto_adjust_button') and self.save_auto_adjust_button:
+                self.save_auto_adjust_button.config(state="normal")
+            messagebox.showinfo("Automātiskā pielāgošana",
+                                f"Automātiskā pielāgošana pabeigta! ✅\n"
+                                f"Labākais rezultāts: {self.best_score:.3f}\n"
+                                f"Spilgtums: {self.best_settings['brightness']}\n"
+                                f"Kontrasts: {self.best_settings['contrast']}\n"
+                                f"Gamma: {self.best_settings['gamma']}")
+        else:
+            messagebox.showwarning("Automātiskā pielāgošana",
+                                   f"Automātiskā pielāgošana pabeigta, bet dokuments netika pietiekami labi atrasts.\n"
+                                   f"Labākais rezultāts: {self.best_score:.3f}\n"
+                                   f"Mēģiniet manuāli pielāgot iestatījumus.")
+
+    def auto_adjust_loop(self):
+        """Automātiskās pielāgošanas cikls."""
+        if not self.auto_adjust_active or not self.preview_window:
+            return
+
+        if self.current_combination_index >= len(self.search_combinations):
+            self.stop_auto_adjust()
+            return
+
+        # Iegūt nākamo parametru kombināciju
+        brightness, contrast, gamma = self.search_combinations[self.current_combination_index]
+
+        # Vizuāli atjaunināt slīdņus
+        self.app.scan_brightness.set(brightness)
+        self.app.scan_contrast.set(contrast)
+        self.app.scan_gamma.set(gamma)
+        self.on_realtime_change()  # Atjaunināt attēlu ar jaunajiem iestatījumiem
+
+        # Novērtēt pašreizējo kombināciju
+        try:
+            print(f"\n--- Kombinācija {self.current_combination_index + 1}/{len(self.search_combinations)} ---")
+            print(f"Iestatījumi: S={brightness}, K={contrast}, G={gamma}")
+
+            score = self.evaluate_document_detection()
+            print(f"Iegūtais novērtējums: {score}")
+
+        except Exception as e:
+            print(f"Kļūda novērtēšanā: {e}")
+            import traceback
+            traceback.print_exc()
+            score = 0.0
+
+        # Ja score ir labāks VAI vienāds bet ar augstāku kontrastu
+        should_update = False
+
+        if score > self.best_score:
+            should_update = True
+        elif score == self.best_score and score > 0:
+            # Ja rezultāts vienāds, izvēlēties augstāko kontrastu
+            if contrast > self.best_settings["contrast"]:
+                should_update = True
+
+        if should_update:
+            self.best_score = score
+            self.best_settings["brightness"] = brightness
+            self.best_settings["contrast"] = contrast
+            self.best_settings["gamma"] = gamma
+        # Atjaunināt progresu
+        progress_percent = (self.current_combination_index + 1) / len(self.search_combinations) * 100
+        self.auto_adjust_progress_label.config(
+            text=f"Progress: {progress_percent:.1f}% (Labākais: {self.best_score:.2f})")
+
+        self.current_combination_index += 1
+        self.auto_adjust_job = self.preview_window.after(20, self.auto_adjust_loop)  # Ļoti ātrs cikls
+
+    def evaluate_document_detection(self):
+        """
+        Novērtē dokumenta atpazīšanas kvalitāti.
+        Atgriež punktu skaitu (score), kur augstāks punkts nozīmē labāku atpazīšanu.
+        """
+        try:
+            print("Sākam dokumenta novērtēšanu...")
+
+            # Izmanto esošo find_document_corners_enhanced metodi
+            detected_corners = self.find_document_corners_enhanced()
+
+            if detected_corners and len(detected_corners) == 4:
+                print(f"Atrasti 4 stūri: {detected_corners}")
+
+                # Aprēķināt kontūras laukumu
+                import cv2
+                import numpy as np
+
+                # Konvertēt stūrus uz numpy array
+                corners_array = np.array(detected_corners, dtype=np.float32)
+                area = cv2.contourArea(corners_array)
+
+                # Iegūt attēla izmērus
+                if hasattr(self, 'original_image_pil') and self.original_image_pil:
+                    img_width, img_height = self.original_image_pil.size
+                    img_area = img_width * img_height
+
+                    # Normalizēts laukums (0-1)
+                    normalized_area = area / img_area
+
+                    # Pamata punkti par atrašanu
+                    base_score = 1.0
+
+                    # Papildu punkti par laukumu
+                    area_score = normalized_area * 2.0  # Maksimums 2.0
+
+                    # Papildu punkti par stūru kvalitāti
+                    quality_score = self.evaluate_corner_quality(corners_array)
+
+                    total_score = base_score + area_score + quality_score
+
+                    print(
+                        f"Novērtējums: pamata={base_score}, laukums={area_score:.3f}, kvalitāte={quality_score:.3f}, kopā={total_score:.3f}")
+
+                    return total_score
+                else:
+                    print("Nav original_image_pil")
+                    return 1.0  # Pamata punkti par atrašanu
+            else:
+                print(f"Stūri nav atrasti vai nav 4: {detected_corners}")
+                return 0.0
+
+        except Exception as e:
+            print(f"Kļūda evaluate_document_detection: {e}")
+            import traceback
+            traceback.print_exc()
+            return 0.0
+
+    def evaluate_corner_quality(self, corners):
+        """Novērtē stūru kvalitāti."""
+        try:
+            import cv2
+            import numpy as np
+
+            # Pārbaudīt, vai stūri veido taisnstūri
+            # Aprēķināt malas garumu
+            distances = []
+            for i in range(4):
+                p1 = corners[i]
+                p2 = corners[(i + 1) % 4]
+                dist = np.sqrt((p1[0] - p2[0]) ** 2 + (p1[1] - p2[1]) ** 2)
+                distances.append(dist)
+
+            # Pārbaudīt, vai pretējās malas ir līdzīgas
+            if len(distances) == 4:
+                side1_diff = abs(distances[0] - distances[2]) / max(distances[0], distances[2])
+                side2_diff = abs(distances[1] - distances[3]) / max(distances[1], distances[3])
+
+                # Jo mazāka atšķirība, jo labāk (maksimums 0.5 punkti)
+                quality = (1.0 - side1_diff) * 0.25 + (1.0 - side2_diff) * 0.25
+
+                return max(0.0, quality)
+
+            return 0.0
+
+        except Exception as e:
+            print(f"Kļūda corner quality: {e}")
+            return 0.0
+
+    def save_auto_adjusted_settings(self):
+        """Saglabā automātiski pielāgotos attēla uzlabošanas iestatījumus."""
+        if self.best_score is not None and self.best_score > 0:
+            # Iestatīt slīdņus uz labākajām vērtībām
+            self.app.scan_brightness.set(self.best_settings["brightness"])
+            self.app.scan_contrast.set(self.best_settings["contrast"])
+            self.app.scan_gamma.set(self.best_settings["gamma"])
+
+            # Saglabāt iestatījumus lietotnes konfigurācijā
+            self.app.settings["scan_brightness"] = self.best_settings["brightness"]
+            self.app.settings["scan_contrast"] = self.best_settings["contrast"]
+            self.app.settings["scan_gamma"] = self.best_settings["gamma"]
+
+            # Pievienot vēsturei
+            import datetime
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            history_entry = {
+                "timestamp": timestamp,
+                "name": f"Auto_{timestamp[:16].replace(' ', '_').replace(':', '-')}",
+                "brightness": self.best_settings["brightness"],
+                "contrast": self.best_settings["contrast"],
+                "gamma": self.best_settings["gamma"],
+                "score": self.best_score,
+                "type": "auto"
+            }
+
+            # Pievienot vēsturei (maksimums 20 ieraksti)
+            self.settings_history.append(history_entry)
+            if len(self.settings_history) > 20:
+                self.settings_history.pop(0)  # Noņemt vecāko
+
+            # Saglabāt vēsturi failā
+            self.save_settings_history()
+            self.update_history_display()
+
+            # Saglabāt iestatījumus failā
+            try:
+                self.app.save_app_settings()
+                messagebox.showinfo("Saglabāts",
+                                    f"Automātiski pielāgotie iestatījumi ir saglabāti un pievienoti vēsturei:\n"
+                                    f"Spilgtums: {self.best_settings['brightness']}\n"
+                                    f"Kontrasts: {self.best_settings['contrast']}\n"
+                                    f"Gamma: {self.best_settings['gamma']}\n"
+                                    f"Rezultāts: {self.best_score:.2f}")
+            except Exception as e:
+                messagebox.showwarning("Saglabāšanas kļūda",
+                                       f"Iestatījumi iestatīti, bet neizdevās saglabāt failā: {e}")
+
+        if hasattr(self, 'save_auto_adjust_button') and self.save_auto_adjust_button:
+            self.save_auto_adjust_button.config(state="disabled")
+
+    def save_settings_history(self):
+        """Saglabā iestatījumu vēsturi failā."""
+        try:
+            import json
+            import os
+
+            # Izveidot settings mapi, ja neeksistē
+            settings_dir = os.path.join(os.path.dirname(__file__), "settings")
+            if not os.path.exists(settings_dir):
+                os.makedirs(settings_dir)
+
+            history_file = os.path.join(settings_dir, "auto_adjust_history.json")
+
+            with open(history_file, 'w', encoding='utf-8') as f:
+                json.dump(self.settings_history, f, indent=2, ensure_ascii=False)
+
+        except Exception as e:
+            print(f"Kļūda saglabājot vēsturi: {e}")
+
+    def load_settings_history(self):
+        """Ielādē iestatījumu vēsturi no faila."""
+        try:
+            import json
+            import os
+
+            history_file = os.path.join(os.path.dirname(__file__), "settings", "auto_adjust_history.json")
+
+            if os.path.exists(history_file):
+                with open(history_file, 'r', encoding='utf-8') as f:
+                    self.settings_history = json.load(f)
+            else:
+                self.settings_history = []
+
+        except Exception as e:
+            print(f"Kļūda ielādējot vēsturi: {e}")
+            self.settings_history = []
+
+    def update_history_display(self):
+        """Atjaunina vēstures saraksta attēlojumu."""
+        if not hasattr(self, 'history_listbox') or not self.history_listbox:
+            return
+
+        # Notīra sarakstu
+        self.history_listbox.delete(0, tk.END)
+
+        # Pievieno ierakstus (jaunākie augšā)
+        for i, entry in enumerate(reversed(self.settings_history)):
+            # Pārbauda, vai ir nosaukums
+            name = entry.get("name", "Bez nosaukuma")
+            entry_type = entry.get("type", "auto")
+            type_symbol = "🔧" if entry_type == "manual" else "🤖"
+
+            display_text = f"{type_symbol} {name} | {entry['timestamp'][:16]} | S:{entry['brightness']} K:{entry['contrast']} G:{entry['gamma']} | Rez:{entry['score']:.2f}"
+            self.history_listbox.insert(tk.END, display_text)
+
+    def auto_load_best_settings(self):
+        """Automātiski ielādē labākos iestatījumus no vēstures."""
+        if not self.settings_history:
+            return
+
+        # Atrast iestatījumus ar augstāko rezultātu
+        best_entry = None
+        best_score = -1.0
+
+        for entry in self.settings_history:
+            entry_score = entry.get("score", 0.0)
+            if entry_score is not None and entry_score > best_score:
+                best_score = entry_score
+                best_entry = entry
+
+        # Ja atrasts labs iestatījums, ielādēt to
+        if best_entry and best_score > 0.5:  # Tikai ja rezultāts ir pietiekami labs
+            try:
+                self.app.scan_brightness.set(best_entry["brightness"])
+                self.app.scan_contrast.set(best_entry["contrast"])
+                self.app.scan_gamma.set(best_entry["gamma"])
+                self.on_realtime_change()
+
+                print(
+                    f"Auto-ielādēti labākie iestatījumi: S:{best_entry['brightness']} K:{best_entry['contrast']} G:{best_entry['gamma']} (Rezultāts: {best_score:.2f})")
+
+            except Exception as e:
+                print(f"Kļūda auto-ielādējot iestatījumus: {e}")
+
+    def load_selected_history(self):
+        """Ielādē izvēlētos iestatījumus no vēstures."""
+        if not hasattr(self, 'history_listbox') or not self.history_listbox:
+            return
+
+        selection = self.history_listbox.curselection()
+        if not selection:
+            messagebox.showwarning("Nav izvēles", "Lūdzu, izvēlieties iestatījumus no saraksta.")
+            return
+
+        # Iegūt izvēlēto ierakstu (saraksts ir apgriezts, tāpēc jāpārrēķina indekss)
+        selected_index = len(self.settings_history) - 1 - selection[0]
+        selected_entry = self.settings_history[selected_index]
+
+        # Iestatīt slīdņus
+        self.app.scan_brightness.set(selected_entry["brightness"])
+        self.app.scan_contrast.set(selected_entry["contrast"])
+        self.app.scan_gamma.set(selected_entry["gamma"])
+
+        # Atjaunināt attēlu
+        self.on_realtime_change()
+
+        messagebox.showinfo("Ielādēts",
+                            f"Iestatījumi ielādēti no {selected_entry['timestamp']}:\n"
+                            f"Spilgtums: {selected_entry['brightness']}\n"
+                            f"Kontrasts: {selected_entry['contrast']}\n"
+                            f"Gamma: {selected_entry['gamma']}")
+
+    def delete_selected_history(self):
+        """Dzēš izvēlētos iestatījumus no vēstures."""
+        if not hasattr(self, 'history_listbox') or not self.history_listbox:
+            return
+
+        selection = self.history_listbox.curselection()
+        if not selection:
+            messagebox.showwarning("Nav izvēles", "Lūdzu, izvēlieties iestatījumus dzēšanai.")
+            return
+
+        # Apstiprinājums
+        if not messagebox.askyesno("Dzēst iestatījumus", "Vai tiešām vēlaties dzēst izvēlētos iestatījumus?"):
+            return
+
+        # Dzēst ierakstu (saraksts ir apgriezts, tāpēc jāpārrēķina indekss)
+        selected_index = len(self.settings_history) - 1 - selection[0]
+        deleted_entry = self.settings_history.pop(selected_index)
+
+        # Saglabāt izmaiņas un atjaunināt attēlojumu
+        self.save_settings_history()
+        self.update_history_display()
+
+        messagebox.showinfo("Dzēsts", f"Iestatījumi no {deleted_entry['timestamp']} ir dzēsti.")
+
+    def save_current_settings_to_history(self):
+        """Saglabā pašreizējos iestatījumus vēsturē ar lietotāja nosaukumu."""
+        # Iegūt pašreizējos iestatījumus
+        current_settings = {
+            "brightness": self.app.scan_brightness.get(),
+            "contrast": self.app.scan_contrast.get(),
+            "gamma": self.app.scan_gamma.get()
+        }
+
+        # Prasīt nosaukumu
+        from tkinter import simpledialog
+        name = simpledialog.askstring("Iestatījumu nosaukums",
+                                      "Ievadiet nosaukumu šiem iestatījumiem:",
+                                      initialvalue=f"Manuāli_{len(self.settings_history) + 1}")
+
+        if name:  # Ja lietotājs ievadīja nosaukumu
+            import datetime
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+            # Novērtēt pašreizējos iestatījumus
+            score = self.evaluate_document_detection() if hasattr(self,
+                                                                  'original_image_pil') and self.original_image_pil else 0.0
+
+            history_entry = {
+                "timestamp": timestamp,
+                "name": name,
+                "brightness": current_settings["brightness"],
+                "contrast": current_settings["contrast"],
+                "gamma": current_settings["gamma"],
+                "score": score,
+                "type": "manual"
+            }
+
+            # Pievienot vēsturei
+            self.settings_history.append(history_entry)
+            if len(self.settings_history) > 50:  # Palielināts limits
+                self.settings_history.pop(0)
+
+            # Saglabāt un atjaunināt
+            self.save_settings_history()
+            self.update_history_display()
+
+            messagebox.showinfo("Saglabāts", f"Iestatījumi '{name}' saglabāti vēsturē!")
+
+    def rename_selected_history(self):
+        """Pārdēvē izvēlēto vēstures ierakstu."""
+        if not hasattr(self, 'history_listbox') or not self.history_listbox:
+            return
+
+        selection = self.history_listbox.curselection()
+        if not selection:
+            messagebox.showwarning("Nav izvēles", "Lūdzu, izvēlieties ierakstu pārdēvēšanai.")
+            return
+
+        # Iegūt izvēlēto ierakstu
+        selected_index = len(self.settings_history) - 1 - selection[0]
+        selected_entry = self.settings_history[selected_index]
+
+        # Prasīt jaunu nosaukumu
+        from tkinter import simpledialog
+        current_name = selected_entry.get("name", "Bez nosaukuma")
+        new_name = simpledialog.askstring("Pārdēvēt ierakstu",
+                                          "Ievadiet jaunu nosaukumu:",
+                                          initialvalue=current_name)
+
+        if new_name and new_name != current_name:
+            # Atjaunināt nosaukumu
+            self.settings_history[selected_index]["name"] = new_name
+
+            # Saglabāt izmaiņas un atjaunināt attēlojumu
+            self.save_settings_history()
+            self.update_history_display()
+
+            messagebox.showinfo("Pārdēvēts", f"Ieraksts pārdēvēts uz '{new_name}'")
+
+    def start_resize(self, event):
+        """Sāk kreisās puses izmēra maiņu."""
+        self.resize_start_x = event.x_root
+        self.resize_active = True
+
+    def do_resize(self, event):
+        """Veic kreisās puses izmēra maiņu."""
+        if not self.resize_active:
+            return
+
+        # Aprēķināt jauno platumu
+        delta_x = event.x_root - self.resize_start_x
+        new_width = self.left_panel_width + delta_x
+
+        # Ierobežot minimālo un maksimālo platumu
+        new_width = max(250, min(600, new_width))
+
+        # Atjaunināt kreisās puses platumu
+        if hasattr(self, 'preview_window') and self.preview_window:
+            # Atrast kreiso frame un atjaunināt tā platumu
+            for child in self.preview_window.winfo_children():
+                if isinstance(child, ttk.Frame):
+                    for subchild in child.winfo_children():
+                        if isinstance(subchild, ttk.Frame) and subchild.winfo_reqwidth() > 200:
+                            subchild.config(width=new_width)
+                            break
+                    break
+
+    def end_resize(self, event):
+        """Beidz kreisās puses izmēra maiņu."""
+        if self.resize_active:
+            # Saglabāt jauno platumu
+            delta_x = event.x_root - self.resize_start_x
+            self.left_panel_width = max(250, min(600, self.left_panel_width + delta_x))
+            self.resize_active = False
+
+    def start_live_scan(self):
+        """Sāk reāllaika skenēšanu."""
+        self.live_scan_active = True
+        if self.live_scan_button:
+            self.live_scan_button.config(text="⏹ Apturēt skenēšanu", bootstyle="danger")
+        if self.save_auto_button:
+            # Poga vienmēr aktīva - nav jāmaina stāvoklis
+            pass
+
+        self.live_scan_loop()
+
+    def stop_live_scan(self):
+        """Aptur reāllaika skenēšanu."""
+        self.live_scan_active = False
+        if self.live_scan_button:
+            self.live_scan_button.config(text="📹 Ieslēgt skenēšanu", bootstyle="success")
+        if self.save_auto_button:
+            # Poga vienmēr aktīva - nav jāmaina stāvoklis
+            pass
+
+        if self.scan_job:
+            self.preview_window.after_cancel(self.scan_job)
+            self.scan_job = None
+
+    def live_scan_loop(self):
+        """Reāllaika skenēšanas cikls."""
+        if not self.live_scan_active or not self.preview_window:
+            if self.preview_window and not self.live_scan_active:
+                self.live_scan_active = True
+            else:
+                return
+
+        try:
+            # Iegūst jaunu kadru no kameras
+            camera_frame_pil = self.app.get_camera_frame()
+            if camera_frame_pil:
+                self.original_image_pil = camera_frame_pil.copy()
+                self.image_to_process = camera_frame_pil.copy()
+
+                # Atjauno video attēlojumu (vienmēr)
+                self.display_live_scan_preview()
+
+                # Meklē dokumentu tikai katru 3. reizi (ātrāk)
+                if not hasattr(self, 'scan_counter'):
+                    self.scan_counter = 0
+                self.scan_counter += 1
+
+                # Meklē dokumentu tikai ja nav "iesaldēts" un katru 3. reizi
+                if not getattr(self, 'document_frozen', False) and self.scan_counter % 3 == 0:
+                    detected_corners = self.find_document_corners_enhanced()
+
+                    if detected_corners:
+                        self.live_detected_corners = detected_corners
+                        self.document_frozen = True
+                        if self.save_auto_button:
+                            self.save_auto_button.config(state="normal", bootstyle="success",
+                                                         text="✅ Nospiediet ENTER vai šo pogu")
+                    elif self.scan_counter % 3 == 0:  # Atjaunina pogu tikai kad meklē
+                        self.live_detected_corners = []
+                        if self.save_auto_button:
+                            self.save_auto_button.config(state="disabled", text="🔍 Meklē dokumentu...")
+
+            # Ātrāks cikls
+            if self.preview_window:
+                self.scan_job = self.preview_window.after(80, self.live_scan_loop)
+
+        except Exception as e:
+            print(f"Kļūda reāllaika skenēšanā: {e}")
+
+    def display_live_scan_preview(self):
+        """Atjauno priekšskatījuma attēlu (samazinātu ātrumam)."""
+        if not self.preview_window or not self.original_image_pil:
+            return
+
+        try:
+            canvas_width = self.preview_canvas.winfo_width()
+            canvas_height = self.preview_canvas.winfo_height()
+
+            if canvas_width <= 1 or canvas_height <= 1:
+                return
+
+            # Samazina TIKAI priekšskatījumam
+            display_img = self.original_image_pil.copy()
+            display_img.thumbnail((canvas_width, canvas_height), Image.Resampling.LANCZOS)
+
+            # Stūri uz samazinātā attēla
+            if self.live_detected_corners and getattr(self, 'document_frozen', False):
+                orig_width, orig_height = self.original_image_pil.size
+                display_width, display_height = display_img.size
+                scale_x = display_width / orig_width
+                scale_y = display_height / orig_height
+
+                scaled_corners = self.live_detected_corners.copy()
+                scaled_corners[:, 0] *= scale_x
+                scaled_corners[:, 1] *= scale_y
+
+                img_cv = cv2.cvtColor(np.array(display_img), cv2.COLOR_RGB2BGR)
+                cv2.drawContours(img_cv, [scaled_corners.astype(int)], -1, (0, 255, 0), 3)
+                display_img = Image.fromarray(cv2.cvtColor(img_cv, cv2.COLOR_BGR2RGB))
+
+            self.preview_photo = ImageTk.PhotoImage(display_img)
+            self.preview_canvas.delete("all")
+            self.preview_canvas.create_image(
+                canvas_width // 2, canvas_height // 2,
+                image=self.preview_photo, anchor="center"
+            )
+
+        except Exception as e:
+            print(f"Priekšskatījuma kļūda: {e}")
+
+    def create_detection_visualization(self):
+        """Izveido detekcijas vizualizāciju (izmanto uzlaboto versiju)."""
+        return self.create_detection_visualization_enhanced()
+
+    def save_auto_detected(self):
+        """Saglabā automātiski atklātos stūrus."""
+        if self.live_detected_corners:
+            self.corners = self.live_detected_corners.copy()
+            self.stop_live_scan()
+            messagebox.showinfo("Saglabāts",
+                                "Automātiski atklātie stūri ir saglabāti!\nTagad varat tos precizēt vai uzreiz pielietot korekciju.")
+            self.display_image_on_canvas()
+        else:
+            messagebox.showwarning("Nav datu", "Nav automātiski atklātu stūru, ko saglabāt.")
+
+    def toggle_live_scan(self):
+        """Ieslēdz/izslēdz reāllaika skenēšanu."""
+        if not self.live_scan_active:
+            self.start_live_scan()
+        else:
+            self.stop_live_scan()
+
+    def start_live_scan(self):
+        """Sāk reāllaika skenēšanu."""
+        self.live_scan_active = True
+        self.document_frozen = False  # Pievienot šo rindu
+        self.live_scan_loop()
+
+    def stop_live_scan(self):
+        """Aptur reāllaika skenēšanu."""
+        self.live_scan_active = False
+        if self.live_scan_button:
+            self.live_scan_button.config(text="📹 Ieslēgt skenēšanu", bootstyle="success")
+        if self.save_auto_button:
+            # Poga vienmēr aktīva - nav jāmaina stāvoklis
+            pass
+
+        if self.scan_job:
+            self.preview_window.after_cancel(self.scan_job)
+            self.scan_job = None
+
+    def live_scan_loop(self):
+        """Reāllaika skenēšanas cikls."""
+        if not self.live_scan_active or not self.preview_window:
+            return
+
+        try:
+            # Mēģina atrast dokumenta stūrus
+            detected_corners = self.find_document_corners()
+
+            if detected_corners:
+                self.live_detected_corners = detected_corners
+                self.document_frozen = True
+
+                # Pievienot skaņas signālu (neobligāti)
+                try:
+                    import winsound
+                    winsound.Beep(1000, 200)  # 1000Hz, 200ms
+                except:
+                    pass  # Ja nav Windows vai nav winsound
+
+                if self.save_auto_button:
+                    self.save_auto_button.config(state="normal", bootstyle="success",
+                                                 text="✅ Nospiediet ENTER vai šo pogu")
+
+            # Atjauno attēlojumu ar reāllaika detekciju
+            self.display_live_scan_preview()
+
+            # Turpina ciklu
+            self.scan_job = self.preview_window.after(300, self.live_scan_loop)
+
+        except Exception as e:
+            print(f"Kļūda reāllaika skenēšanā: {e}")
+            self.stop_live_scan()
+
+    def display_live_scan_preview(self):
+        """Attēlo reāllaika skenēšanas priekšskatījumu."""
+        if self.original_image_pil is None or self.canvas is None:
+            return
+
+        try:
+            canvas_width = self.canvas.winfo_width()
+            canvas_height = self.canvas.winfo_height()
+        except tk.TclError:
+            return
+
+        if canvas_width <= 1 or canvas_height <= 1:
+            self.preview_window.after(50, self.display_live_scan_preview)
+            return
+
+        # Izveido vizualizācijas attēlu
+        display_img = self.create_detection_visualization()
+
+        img_width, img_height = display_img.size
+        scaled_width = int(img_width * self.zoom_factor)
+        scaled_height = int(img_height * self.zoom_factor)
+
+        display_img_resized = display_img.resize((scaled_width, scaled_height), Image.LANCZOS)
+        self.photo_image = ImageTk.PhotoImage(display_img_resized)
+
+        self.canvas.delete("all")
+
+        # Aprēķina attēla pozīciju
+        self.img_on_canvas_x = (canvas_width - scaled_width) / 2 + self.pan_x
+        self.img_on_canvas_y = (canvas_height - scaled_height) / 2 + self.pan_y
+
+        self.canvas.create_image(self.img_on_canvas_x, self.img_on_canvas_y, anchor="nw", image=self.photo_image)
+        self.canvas.image = self.photo_image
+
+        # Status teksts
+        status_text = "🔍 REĀLLAIKA SKENĒŠANA AKTĪVA"
+        if self.live_detected_corners:
+            status_text += "\n✅ DOKUMENTS ATRASTS!"
+        else:
+            status_text += "\n❌ Dokuments nav atrasts"
+
+        self.canvas.create_text(
+            10, 10, text=status_text, anchor="nw",
+            fill="lime" if self.live_detected_corners else "red",
+            font=("Arial", 12, "bold"), tags="status"
+        )
+
+    def on_realtime_change(self, *args):
+        """Reāllaika iestatījumu maiņa."""
+        # Ja reāllaika skenēšana ir aktīva, atjauno vizualizāciju
+        if hasattr(self, 'live_scan_active') and self.live_scan_active:
+            self.display_live_scan_preview()
+
+    def choose_color(self):
+        """Atver krāsu izvēles dialogu."""
+        from tkinter import colorchooser
+        color = colorchooser.askcolor(title="Izvēlieties dokumenta krāsu")
+        if color[1]:  # Ja krāsa tika izvēlēta
+            self.app.scan_target_color.set(color[1])
+            self.on_realtime_change()
+
+    def enable_color_picker(self):
+        """Ieslēdz krāsu atlasīšanas režīmu."""
+        self.color_picker_mode = True
+        self.canvas.config(cursor="crosshair")
+        messagebox.showinfo("Krāsu atlase", "Noklikšķiniet uz attēla, lai atlasītu dokumenta krāsu.")
+
+    def pick_color_from_image(self, event):
+        """Atlasa krāsu no attēla."""
+        if not self.original_image_pil or not hasattr(self, 'img_on_canvas_x'):
+            return
+
+        # Konvertē kanvasa koordinātas uz attēla koordinātām
+        canvas_x = self.canvas.canvasx(event.x)
+        canvas_y = self.canvas.canvasy(event.y)
+
+        img_x = int((canvas_x - self.img_on_canvas_x) / self.zoom_factor)
+        img_y = int((canvas_y - self.img_on_canvas_y) / self.zoom_factor)
+
+        # Pārbauda, vai koordinātas ir attēla robežās
+        img_w, img_h = self.original_image_pil.size
+        if 0 <= img_x < img_w and 0 <= img_y < img_h:
+            # Iegūst pikseļa krāsu
+            pixel_color = self.original_image_pil.getpixel((img_x, img_y))
+            if isinstance(pixel_color, int):  # Pelēktoņu attēls
+                pixel_color = (pixel_color, pixel_color, pixel_color)
+
+            # Konvertē uz hex formātu
+            hex_color = "#{:02x}{:02x}{:02x}".format(pixel_color[0], pixel_color[1], pixel_color[2])
+            self.app.scan_target_color.set(hex_color)
+
+            messagebox.showinfo("Krāsa atlasīta", f"Atlasītā krāsa: {hex_color}")
+
+            # Ja reāllaika skenēšana ir aktīva, atjauno
+            if self.live_scan_active:
+                self.display_live_scan_preview()
+
+    def close_preview_window(self, release_camera=True):
+        """Aizver priekšskatījuma logu un aptur skenēšanu."""
+        self.stop_live_scan()
+        if self.preview_window:
+            # Noņem visus taustiņu bindings
+            try:
+                self.preview_window.unbind('<Return>')
+                self.preview_window.unbind('<r>')
+                self.preview_window.unbind('<R>')
+            except:
+                pass
+            try:
+                self.preview_window.destroy()
+            except:
+                pass
+            self.preview_window = None
+
+        # Atbrīvo kameru tikai ja nepieciešams
+        if release_camera:
+            self.app.release_camera()
+
+    def show_document_detection_preview(self):
+        if self.original_image_pil is None:
+            messagebox.showwarning("Nav attēla", "Lūdzu, vispirms atlasiet attēlu.")
+            return
+
+        self.preview_window = Toplevel(self.app)
+        self.preview_window.title("Dokumenta robežu korekcija un reāllaika detekcija")
+
+        # Mēģina iegūt precīzus darba laukuma izmērus, lai izvairītos no uzdevumjoslas pārklāšanās
+        try:
+            import ctypes
+            # Pārbauda, vai ir Windows operētājsistēma
+            if sys.platform.startswith('win'):
+                user32 = ctypes.windll.user32
+                # SM_CXFULLSCREEN un SM_CYFULLSCREEN atgriež darba laukuma izmērus
+                work_width = user32.GetSystemMetrics(16)  # SM_CXFULLSCREEN
+                work_height = user32.GetSystemMetrics(17)  # SM_CYFULLSCREEN
+                # Darba laukuma pozīcija (parasti 0,0)
+                work_x = 0
+                work_y = 0
+                self.preview_window.geometry(f"{work_width}x{work_height}+{work_x}+{work_y}")
+            else:
+                # Citas OS (Linux, macOS) - izmanto standarta maksimizāciju
+                self.preview_window.state('zoomed')
+        except (ImportError, AttributeError, OSError) as e:
+            print(f"Nevarēja izmantot ctypes Windows API: {e}. Izmanto standarta maksimizāciju.")
+            self.preview_window.state(
+                'zoomed')  # Atgriežas pie standarta maksimizācijas, ja ctypes nav pieejams vai rodas kļūda
+
+        # Papildus, lai nodrošinātu, ka logs ir redzams un aktīvs
+        self.preview_window.deiconify()  # Pārliecinās, ka logs ir redzams
+        self.preview_window.lift()  # Paceļ logu virs citiem logiem
+        self.preview_window.focus_force()  # Piešķir loga fokusu
+
+        # Papildus, lai nodrošinātu, ka logs ir redzams un aktīvs
+        self.preview_window.deiconify()  # Pārliecinās, ka logs ir redzams
+        self.preview_window.lift()  # Paceļ logu virs citiem logiem
+        self.preview_window.focus_force()  # Piešķir loga fokusu
+        # Alternatīvi var izmantot:
+        # self.preview_window.attributes('-fullscreen', True)  # Īsts fullscreen
+
+        self.preview_window.transient(self.app)
+        self.preview_window.grab_set()
+
+        # Pievienot ESC taustiņu, lai izietu no pilnekrāna
+        self.preview_window.bind('<Escape>', lambda event: self.close_preview_window())
+        # Pievienot taustiņu atbalstu
+        self.preview_window.bind('<Return>', lambda event: self.capture_and_process_frame())
+        self.preview_window.bind('<r>', lambda event: self.refresh_camera_view())
+        self.preview_window.bind('<R>', lambda event: self.refresh_camera_view())
+        self.preview_window.focus_set()  # Nodrošina, ka logs var saņemt taustiņu nospiešanas
+
+        # Galvenais konteiners
+        main_container = ttk.Frame(self.preview_window)
+        main_container.pack(fill="both", expand=True, padx=5, pady=5)
+
+        # Kreisā puse - kontroles ar scrollbar (resizable)
+        if not hasattr(self, 'left_panel_width'):
+            self.left_panel_width = 380
+
+        left_panel_container = ttk.Frame(main_container, width=self.left_panel_width)
+        left_panel_container.pack(side="left", fill="y", padx=(0, 0))
+        left_panel_container.pack_propagate(False)
+
+        # Scrollable canvas kreisajam panelim
+        left_canvas = tk.Canvas(left_panel_container, width=380, highlightthickness=0)
+        left_scrollbar = ttk.Scrollbar(left_panel_container, orient="vertical", command=left_canvas.yview)
+        left_panel = ttk.Frame(left_canvas)
+
+        # Konfigurē scroll funkcionalitāti
+        def configure_left_scroll_region(event):
+            try:
+                if left_canvas.winfo_exists():
+                    left_canvas.configure(scrollregion=left_canvas.bbox("all"))
+            except tk.TclError:
+                pass
+
+        left_panel.bind("<Configure>", configure_left_scroll_region)
+
+        # Pievieno left_panel uz canvas
+        left_canvas_frame = left_canvas.create_window((0, 0), window=left_panel, anchor="nw")
+
+        # Konfigurē canvas izmēru
+        def configure_left_canvas(event):
+            try:
+                if left_canvas.winfo_exists():
+                    left_canvas.itemconfig(left_canvas_frame, width=event.width)
+            except tk.TclError:
+                pass
+
+        left_canvas.bind('<Configure>', configure_left_canvas)
+        left_canvas.configure(yscrollcommand=left_scrollbar.set)
+
+        # Peles rullīša atbalsts kreisajam panelim
+        def on_left_mousewheel(event):
+            try:
+                if left_canvas.winfo_exists() and self.preview_window.winfo_exists():
+                    left_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+            except (tk.TclError, AttributeError):
+                pass
+
+        def bind_left_mousewheel(event):
+            try:
+                if left_canvas.winfo_exists():
+                    left_canvas.bind_all("<MouseWheel>", on_left_mousewheel)
+            except tk.TclError:
+                pass
+
+        def unbind_left_mousewheel(event):
+            try:
+                left_canvas.unbind_all("<MouseWheel>")
+            except tk.TclError:
+                pass
+
+        # Piesaista peles rullīti tikai kad pele ir virs kreisā paneļa
+        left_canvas.bind('<Enter>', bind_left_mousewheel)
+        left_canvas.bind('<Leave>', unbind_left_mousewheel)
+
+        # Ievieto canvas un scrollbar
+        left_canvas.pack(side="left", fill="both", expand=True)
+        left_scrollbar.pack(side="right", fill="y")
+
+        # Resizer handle starp kreiso un labo paneli
+        resizer_frame = ttk.Frame(main_container, width=8, cursor="sb_h_double_arrow")
+        resizer_frame.pack(side="left", fill="y", padx=2)
+        resizer_frame.pack_propagate(False)
+
+        # Vizuāls indikators resizer handle
+        resizer_line = tk.Frame(resizer_frame, width=2, bg="#cccccc")
+        resizer_line.pack(fill="y", expand=True, padx=3)
+
+        # Resizer funkcionalitāte
+        self.resize_active = False
+        self.resize_start_x = 0
+
+        def start_resize(event):
+            self.resize_active = True
+            self.resize_start_x = event.x_root
+            resizer_frame.config(cursor="sb_h_double_arrow")
+
+        def do_resize(event):
+            if not self.resize_active:
+                return
+
+            delta_x = event.x_root - self.resize_start_x
+            new_width = self.left_panel_width + delta_x
+
+            # Ierobežot platumu
+            new_width = max(250, min(600, new_width))
+
+            # Atjaunināt kreisā paneļa platumu
+            left_panel_container.config(width=new_width)
+
+        def end_resize(event):
+            if self.resize_active:
+                delta_x = event.x_root - self.resize_start_x
+                self.left_panel_width = max(250, min(600, self.left_panel_width + delta_x))
+                left_panel_container.config(width=self.left_panel_width)
+                self.resize_active = False
+                resizer_frame.config(cursor="sb_h_double_arrow")
+
+        # Piesaistīt notikumus
+        resizer_frame.bind("<Button-1>", start_resize)
+        resizer_frame.bind("<B1-Motion>", do_resize)
+        resizer_frame.bind("<ButtonRelease-1>", end_resize)
+        resizer_line.bind("<Button-1>", start_resize)
+        resizer_line.bind("<B1-Motion>", do_resize)
+        resizer_line.bind("<ButtonRelease-1>", end_resize)
+
+        # Hover efekts
+        def on_resizer_enter(event):
+            resizer_line.config(bg="#999999")
+
+        def on_resizer_leave(event):
+            resizer_line.config(bg="#cccccc")
+
+        resizer_frame.bind("<Enter>", on_resizer_enter)
+        resizer_frame.bind("<Leave>", on_resizer_leave)
+        resizer_line.bind("<Enter>", on_resizer_enter)
+        resizer_line.bind("<Leave>", on_resizer_leave)
+
+        # Labā puse - attēls
+        right_panel = ttk.Frame(main_container)
+        right_panel.pack(side="left", fill="both", expand=True)  # Mainīts no "right" uz "left"
+
+        # === KREISĀ PANEĻA SATURS ===
+
+        # Pamata kontroles
+        basic_frame = ttk.LabelFrame(left_panel, text="Pamata kontroles", padding="10")
+        basic_frame.pack(fill="x", pady=8)
+
+        ttk.Button(basic_frame, text="🔄 Atiestatīt skatu", command=self.reset_view, width=25).pack(pady=2)
+        ttk.Button(basic_frame, text="🔍+ Tuvināt", command=lambda: self.change_zoom(1.1), width=25).pack(pady=2)
+        ttk.Button(basic_frame, text="🔍- Attālināt", command=lambda: self.change_zoom(0.9), width=25).pack(pady=2)
+        ttk.Button(basic_frame, text="🤖 Auto noteikt", command=self.auto_detect_corners, width=25).pack(pady=2)
+
+        # Reāllaika skenēšana
+        scan_frame = ttk.LabelFrame(left_panel, text="Reāllaika skenēšana", padding="10")
+        scan_frame.pack(fill="x", pady=8)
+
+        self.live_scan_button = ttk.Button(scan_frame, text="📹 Ieslēgt skenēšanu",
+                                           command=self.toggle_live_scan, bootstyle="success", width=25)
+        self.live_scan_button.pack(pady=2)
+
+        self.save_auto_button = ttk.Button(scan_frame, text="💾 Saglabāt auto ieskenēto",
+                                           command=self.save_auto_detected, bootstyle="warning",
+                                           state="normal", width=25)  # VIENMĒR AKTĪVA!
+        self.save_auto_button.pack(pady=2)
+
+        # Attēla uzlabojumi
+        enhance_frame = ttk.LabelFrame(left_panel, text="Attēla uzlabojumi", padding="10")
+        enhance_frame.pack(fill="x", pady=8)
+
+        # Automātiskā pielāgošana
+        self.auto_adjust_button = ttk.Button(enhance_frame, text="Automātiskā pielāgošana (Izsl.)",
+                                             command=self.toggle_auto_adjust, bootstyle="secondary")
+        self.auto_adjust_button.pack(fill="x", pady=5)
+
+        self.save_auto_adjust_button = ttk.Button(enhance_frame, text="Saglabāt automātiski pielāgotos iestatījumus",
+                                                  command=self.save_auto_adjusted_settings, bootstyle="info",
+                                                  state="disabled")
+        self.save_auto_adjust_button.pack(fill="x", pady=5)
+
+        # Manuālā saglabāšana
+        self.save_manual_button = ttk.Button(enhance_frame, text="Saglabāt pašreizējos iestatījumus vēsturē",
+                                             command=self.save_current_settings_to_history, bootstyle="success")
+        self.save_manual_button.pack(fill="x", pady=5)
+
+        self.auto_adjust_progress_label = ttk.Label(enhance_frame, text="Progress: 0%", bootstyle="info")
+        self.auto_adjust_progress_label.pack(fill="x", pady=2)
+
+        # Iestatījumu vēstures sadaļa
+        history_frame = ttk.LabelFrame(enhance_frame, text="Iestatījumu vēsture", padding=10)
+        history_frame.pack(fill="both", expand=True, pady=5)
+
+        # Saraksts ar saglabātajiem iestatījumiem
+        history_list_frame = ttk.Frame(history_frame)
+        history_list_frame.pack(fill="both", expand=True, pady=2)
+
+        self.history_listbox = tk.Listbox(history_list_frame, height=4, font=("Arial", 9))
+        self.history_listbox.pack(side="left", fill="both", expand=True)
+
+        history_scrollbar = ttk.Scrollbar(history_list_frame, orient="vertical", command=self.history_listbox.yview)
+        history_scrollbar.pack(side="right", fill="y")
+        self.history_listbox.config(yscrollcommand=history_scrollbar.set)
+
+        # Pogas vēstures pārvaldībai
+        history_buttons_frame = ttk.Frame(history_frame)
+        history_buttons_frame.pack(fill="x", pady=2)
+
+        self.load_history_button = ttk.Button(history_buttons_frame, text="Ielādēt",
+                                              command=self.load_selected_history, bootstyle="info")
+        self.load_history_button.pack(side="left", padx=2)
+
+        self.rename_history_button = ttk.Button(history_buttons_frame, text="Pārdēvēt",
+                                                command=self.rename_selected_history, bootstyle="warning")
+        self.rename_history_button.pack(side="left", padx=2)
+
+        self.delete_history_button = ttk.Button(history_buttons_frame, text="Dzēst",
+                                                command=self.delete_selected_history, bootstyle="danger")
+        self.delete_history_button.pack(side="left", padx=2)
+
+        # Ielādē saglabāto vēsturi
+        self.load_settings_history()
+        self.update_history_display()
+        # Auto-ielādēt labākos iestatījumus, ja tie eksistē
+        self.auto_load_best_settings()
+
+        # Spilgtums
+        ttk.Label(enhance_frame, text="Spilgtums:").pack(anchor="w")
+        brightness_scale = ttk.Scale(enhance_frame, from_=-100, to=100, variable=self.app.scan_brightness,
+                                     orient="horizontal", command=self.on_realtime_change)
+        brightness_scale.pack(fill="x", pady=2)
+        brightness_label = ttk.Label(enhance_frame, textvariable=self.app.scan_brightness)
+        brightness_label.pack(anchor="w")
+
+        # Kontrasts
+        ttk.Label(enhance_frame, text="Kontrasts:").pack(anchor="w", pady=(5, 0))
+        contrast_scale = ttk.Scale(enhance_frame, from_=-100, to=100, variable=self.app.scan_contrast,
+                                   orient="horizontal", command=self.on_realtime_change)
+        contrast_scale.pack(fill="x", pady=2)
+        contrast_label = ttk.Label(enhance_frame, textvariable=self.app.scan_contrast)
+        contrast_label.pack(anchor="w")
+
+        # Gamma
+        ttk.Label(enhance_frame, text="Gamma:").pack(anchor="w", pady=(5, 0))
+        gamma_scale = ttk.Scale(enhance_frame, from_=0.1, to=3.0, variable=self.app.scan_gamma,
+                                orient="horizontal", command=self.on_realtime_change)
+        gamma_scale.pack(fill="x", pady=2)
+        gamma_label = ttk.Label(enhance_frame, textvariable=self.app.scan_gamma)
+        gamma_label.pack(anchor="w")
+
+        # Krāsu detekcija
+        color_frame = ttk.LabelFrame(left_panel, text="Krāsu detekcija", padding="10")
+        color_frame.pack(fill="x", pady=8)
+
+        color_check = ttk.Checkbutton(color_frame, text="Ieslēgt krāsu detekciju",
+                                      variable=self.app.scan_use_color_detection,
+                                      command=self.on_realtime_change)
+        color_check.pack(anchor="w", pady=2)
+
+        # Krāsu atlasītājs
+        color_select_frame = ttk.Frame(color_frame)
+        color_select_frame.pack(fill="x", pady=2)
+
+        ttk.Label(color_select_frame, text="Mērķa krāsa:").pack(side="left")
+        self.color_display = tk.Label(color_select_frame, width=3, height=1,
+                                      bg=self.app.scan_target_color.get())
+        self.color_display.pack(side="right", padx=5)
+
+        ttk.Button(color_frame, text="🎨 Izvēlēties krāsu",
+                   command=self.choose_color, width=25).pack(pady=2)
+        ttk.Button(color_frame, text="👆 Atlasīt no attēla",
+                   command=self.enable_color_picker, width=25).pack(pady=2)
+
+        # Krāsu tolerance
+        ttk.Label(color_frame, text="Krāsu tolerance:").pack(anchor="w", pady=(5, 0))
+        tolerance_scale = ttk.Scale(color_frame, from_=1, to=100, variable=self.app.scan_color_tolerance,
+                                    orient="horizontal", command=self.on_realtime_change)
+        tolerance_scale.pack(fill="x", pady=2)
+        tolerance_label = ttk.Label(color_frame, textvariable=self.app.scan_color_tolerance)
+        tolerance_label.pack(anchor="w")
+
+        # Detekcijas iestatījumi (kompaktāk)
+        detection_frame = ttk.LabelFrame(left_panel, text="Detekcijas iestatījumi", padding="10")
+        detection_frame.pack(fill="x", pady=8)
+
+        ttk.Button(detection_frame, text="⚙️ Detalizēti iestatījumi",
+                   command=lambda: self.app.show_scan_settings(self.preview_window), width=25).pack(pady=2)
+
+        # Morfoloģija
+        morph_check = ttk.Checkbutton(detection_frame, text="Morfoloģiskā apstrāde",
+                                      variable=self.app.scan_morphology_enabled,
+                                      command=self.on_realtime_change)
+        morph_check.pack(anchor="w", pady=2)
+
+        # === LABĀ PANEĻA SATURS ===
+
+        # Canvas attēlam
+        self.canvas = tk.Canvas(right_panel, bg="gray", cursor="fleur")
+        self.canvas.pack(fill="both", expand=True)
+
+        # Piesaista notikumus
+        self.canvas.bind("<Configure>", self.on_canvas_resize)
+        self.canvas.bind("<MouseWheel>", self.on_mouse_wheel)
+        self.canvas.bind("<Button-4>", self.on_mouse_wheel)
+        self.canvas.bind("<Button-5>", self.on_mouse_wheel)
+        self.canvas.bind("<ButtonPress-1>", self.on_mouse_down)
+        self.canvas.bind("<B1-Motion>", self.on_mouse_drag)
+        self.canvas.bind("<ButtonRelease-1>", self.on_mouse_up)
+        self.canvas.bind("<ButtonPress-2>", self.on_pan_start)
+        self.canvas.bind("<B2-Motion>", self.on_pan_drag)
+        self.canvas.bind("<ButtonRelease-2>", self.on_pan_end)
+
+        # Apakšējās pogas
+        button_frame = ttk.Frame(self.preview_window)
+        button_frame.pack(fill="x", padx=5, pady=5)
+
+        self.save_auto_button = ttk.Button(button_frame, text="🔍 Meklē dokumentu... (ENTER)",
+                                           command=self.capture_and_process_frame,
+                                           bootstyle="success", state="normal")  # VIENMĒR AKTĪVA!
+        self.save_auto_button.pack(side="right", padx=5)
+
+        # Kameras izvēles dropdown
+        camera_frame = ttk.Frame(button_frame)
+        camera_frame.pack(side="right", padx=5)
+
+        ttk.Label(camera_frame, text="Kamera:", font=("Arial", 8)).pack(side="top")
+        self.camera_var = tk.IntVar(value=getattr(self.app, 'current_camera_index', 0))
+        self.camera_combo = ttk.Combobox(camera_frame, textvariable=self.camera_var,
+                                         width=8, values=[0, 1, 2, 3], state="readonly")
+        self.camera_combo.pack(side="top")
+        self.camera_combo.bind('<<ComboboxSelected>>', self.on_camera_change)
+
+        # Pievienot "Atsvaidzināt kameru" pogu
+        self.refresh_camera_button = ttk.Button(button_frame, text="📷 Atsvaidzināt",
+                                                command=self.refresh_camera_view,
+                                                bootstyle="info")
+        self.refresh_camera_button.pack(side="right", padx=5)
+
+        ttk.Button(button_frame, text="❌ Pabeigt skenēšanu",
+                   command=self.close_preview_window, bootstyle="danger").pack(side="right", padx=5)
+
+        # Pievienot instrukciju tekstu
+        instruction_label = ttk.Label(button_frame,
+                                      text="ENTER - saglabāt | R - atsvaidzināt | Dropdown - mainīt kameru",
+                                      font=("Arial", 9), foreground="blue")
+        instruction_label.pack(side="left", padx=5)
+        self.save_auto_button.pack(side="right", padx=5)
+
+        # Inicializācija
+        self.color_picker_mode = False
+        self.preview_window.after(100, self.delayed_auto_detect)
+
+    def on_realtime_change(self, *args):
+        """Reāllaika iestatījumu maiņa."""
+        # Atjauno krāsu displeja
+        if hasattr(self, 'color_display'):
+            self.color_display.config(bg=self.app.scan_target_color.get())
+
+        # Ja reāllaika skenēšana ir aktīva, atjauno vizualizāciju
+        if hasattr(self, 'live_scan_active') and self.live_scan_active:
+            self.display_live_scan_preview()
+
+        # JAUNS: Saglabā iestatījumus katru reizi, kad tie tiek mainīti
+        self.app.save_app_settings()
+
+    def choose_color(self):
+        """Atver krāsu izvēles dialogu."""
+        from tkinter import colorchooser
+        color = colorchooser.askcolor(title="Izvēlieties dokumenta krāsu")
+        if color[1]:  # Ja krāsa tika izvēlēta
+            self.app.scan_target_color.set(color[1])
+            self.on_realtime_change()
+
+    def enable_color_picker(self):
+        """Ieslēdz krāsu atlasīšanas režīmu."""
+        self.color_picker_mode = True
+        self.canvas.config(cursor="crosshair")
+        messagebox.showinfo("Krāsu atlase", "Noklikšķiniet uz attēla, lai atlasītu dokumenta krāsu.")
+
+    ''''def close_preview_window(self):
+        """Droši aizver priekšskatījuma logu."""
+        self.stop_live_scan()  # Aptur reāllaika skenēšanu
+
+        # Notīra peles rullīša notikumus
+        try:
+            if hasattr(self, 'preview_window') and self.preview_window:
+                self.preview_window.unbind_all("<MouseWheel>")
+        except:
+            pass
+
+        if self.preview_window:
+            self.preview_window.destroy()
+            self.preview_window = None '''
+
+    def on_mouse_down(self, event):
+        """Apstrādā peles klikšķi."""
+        # Ja krāsu atlasīšanas režīms ir aktīvs
+        if hasattr(self, 'color_picker_mode') and self.color_picker_mode:
+            self.pick_color_from_image(event)
+            self.color_picker_mode = False
+            self.canvas.config(cursor="fleur")
+            return
+
+        # Pārējā loģika stūru vilkšanai
+        for handle in self.corner_handles:
+            x1, y1, x2, y2 = self.canvas.coords(handle["id"])
+            if x1 <= event.x <= x2 and y1 <= event.y <= y2:
+                self.active_handle = handle
+                self.canvas.config(cursor="hand2")
+                break
+        if self.active_handle is None:
+            # Ja nav stūra marķieris, sāk pārvietošanu
+            self.on_pan_start(event)
+
+    def delayed_auto_detect(self):
+        """Aizkavēta auto detekcija, lai nodrošinātu, ka canvas ir gatavs."""
+        try:
+            self.auto_detect_corners()
+        except Exception as e:
+            print(f"Kļūda auto detekcijā: {e}")
+            # Ja auto detekcija neizdodas, iestatām noklusējuma stūrus
+            if self.original_image_pil:
+                img_w, img_h = self.original_image_pil.size
+                margin = min(img_w, img_h) * 0.05
+                self.corners = [
+                    [margin, margin],
+                    [img_w - margin, margin],
+                    [img_w - margin, img_h - margin],
+                    [margin, img_h - margin]
+                ]
+                self.display_image_on_canvas()
+
+    def reset_view(self):
+        self.zoom_factor = 1.0
+        self.pan_x = 0
+        self.pan_y = 0
+        self.display_image_on_canvas()
+
+    def change_zoom(self, factor):
+        self.zoom_factor *= factor
+        self.display_image_on_canvas()
+
+    def auto_detect_corners(self):
+        """Automātiski atrod dokumenta stūrus vai iestatīt manuāli."""
+        if not self.corners:  # Ja nav iepriekš iestatīti stūri
+            found_corners = self.find_document_corners()
+            if not found_corners:
+                messagebox.showinfo("Manuālā atlase",
+                                    "Automātiski netika atrasts dokuments.\n\n" +
+                                    "Tagad varat manuāli vilkt krāsainos stūru marķierus, " +
+                                    "lai precīzi iezīmētu dokumenta robežas.\n\n" +
+                                    "Instrukcijas:\n" +
+                                    "• Vilkiet krāsainos apļus uz dokumenta stūriem\n" +
+                                    "• Izmantojiet peles rullīti tālummaiņai\n" +
+                                    "• Vilkiet ar vidējo pogu, lai pārvietotos")
+                # Iestatīt noklusējuma stūrus uz visa attēla robežām
+                img_w, img_h = self.original_image_pil.size
+                margin = min(img_w, img_h) * 0.05  # 5% atkāpe no malām
+                self.corners = [
+                    [margin, margin],  # Augšā pa kreisi
+                    [img_w - margin, margin],  # Augšā pa labi
+                    [img_w - margin, img_h - margin],  # Apakšā pa labi
+                    [margin, img_h - margin]  # Apakšā pa kreisi
+                ]
+            else:
+                messagebox.showinfo("Automātiskā detekcija",
+                                    "Dokuments veiksmīgi atrasts automātiski!\n\n" +
+                                    "Jūs joprojām varat precizēt stūru pozīcijas, " +
+                                    "vilkot krāsainos marķierus.")
+
+        # Drošs izsaukums display_image_on_canvas
+        try:
+            self.display_image_on_canvas()
+        except Exception as e:
+            print(f"Kļūda attēlojot attēlu: {e}")
+            # Mēģinām vēlreiz pēc īsa laika
+            if self.canvas and self.preview_window:
+                self.preview_window.after(100, self.display_image_on_canvas)
+
+    def display_image_on_canvas(self):
+        if self.original_image_pil is None or self.canvas is None:
+            return
+
+        # Pārbaudām, vai canvas joprojām eksistē
+        try:
+            canvas_width = self.canvas.winfo_width()
+            canvas_height = self.canvas.winfo_height()
+        except tk.TclError:
+            # Canvas ir iznīcināts, izejam
+            return
+
+        if canvas_width <= 1 or canvas_height <= 1:
+            # Canvas vēl nav gatavs, mēģinām vēlreiz pēc īsa laika
+            self.canvas.after(50, self.display_image_on_canvas)
+            return
+
+        img_width, img_height = self.original_image_pil.size
+        scaled_width = int(img_width * self.zoom_factor)
+        scaled_height = int(img_height * self.zoom_factor)
+
+        display_img = self.original_image_pil.resize((scaled_width, scaled_height), Image.LANCZOS)
+        self.photo_image = ImageTk.PhotoImage(display_img)
+
+        self.canvas.delete("all")
+        self.corner_handles = []
+
+        # Aprēķina attēla pozīciju ar pārvietošanu
+        self.img_on_canvas_x = (canvas_width - scaled_width) / 2 + self.pan_x
+        self.img_on_canvas_y = (canvas_height - scaled_height) / 2 + self.pan_y
+
+        self.canvas.create_image(self.img_on_canvas_x, self.img_on_canvas_y, anchor="nw", image=self.photo_image)
+        self.canvas.image = self.photo_image
+
+        # Zīmē stūrus, ja tie ir definēti
+        if len(self.corners) == 4:
+            handle_size = max(8, int(12 / self.zoom_factor))
+
+            # Zīmē līnijas starp stūriem
+            points = []
+            for corner in self.corners:
+                x_on_canvas = self.img_on_canvas_x + corner[0] * self.zoom_factor
+                y_on_canvas = self.img_on_canvas_y + corner[1] * self.zoom_factor
+                points.extend([x_on_canvas, y_on_canvas])
+
+            # Zīmē dokumenta kontūru
+            self.canvas.create_polygon(points, outline="red", width=3, fill="", tags="corner_lines")
+
+            # Zīmē stūru marķierus
+            corner_colors = ["#FF6B6B", "#4ECDC4", "#45B7D1", "#96CEB4"]
+            corner_labels = ["TL", "TR", "BR", "BL"]
+
+            for i, corner in enumerate(self.corners):
+                x_on_canvas = self.img_on_canvas_x + corner[0] * self.zoom_factor
+                y_on_canvas = self.img_on_canvas_y + corner[1] * self.zoom_factor
+
+                # Zīmē stūra marķieri
+                handle_id = self.canvas.create_oval(
+                    x_on_canvas - handle_size, y_on_canvas - handle_size,
+                    x_on_canvas + handle_size, y_on_canvas + handle_size,
+                    fill=corner_colors[i], outline="white", width=2, tags="corner_handle"
+                )
+
+                # Pievieno teksta etiķeti
+                text_id = self.canvas.create_text(
+                    x_on_canvas, y_on_canvas - handle_size - 15,
+                    text=corner_labels[i], fill="white", font=("Arial", 10, "bold"),
+                    tags="corner_label"
+                )
+
+                self.corner_handles.append({
+                    "id": handle_id,
+                    "text_id": text_id,
+                    "index": i,
+                    "original_x": corner[0],
+                    "original_y": corner[1]
+                })
+
+            # Nodrošina, ka marķieri ir virspusē
+            self.canvas.tag_raise("corner_handle")
+            self.canvas.tag_raise("corner_label")
+
+        # Pievieno instrukciju tekstu
+        instruction_text = (
+            "Instrukcijas:\n"
+            "• Vilkiet krāsainos stūru marķierus\n"
+            "• Peles rullītis: tālummaiņa\n"
+            "• Vidējā poga: pārvietošana"
+        )
+        self.canvas.create_text(
+            10, 10, text=instruction_text, anchor="nw",
+            fill="yellow", font=("Arial", 10), tags="instructions"
+        )
+
+    def on_canvas_resize(self, event):
+        self.display_image_on_canvas()
+
+    def on_mouse_wheel(self, event):
+        if event.num == 5 or event.delta == -120:  # Zoom out
+            self.zoom_factor = max(0.1, self.zoom_factor * 0.9)
+        if event.num == 4 or event.delta == 120:  # Zoom in
+            self.zoom_factor = min(5.0, self.zoom_factor * 1.1)
+        self.display_image_on_canvas()
+
+    def on_pan_start(self, event):
+        self.start_pan_x = event.x - self.pan_x
+        self.start_pan_y = event.y - self.pan_y
+        self.canvas.config(cursor="fleur")
+
+    def on_pan_drag(self, event):
+        self.pan_x = event.x - self.start_pan_x
+        self.pan_y = event.y - self.start_pan_y
+        self.display_image_on_canvas()
+
+    def on_pan_end(self, event):
+        self.canvas.config(cursor="arrow")
+
+    def on_mouse_down(self, event):
+        for handle in self.corner_handles:
+            x1, y1, x2, y2 = self.canvas.coords(handle["id"])
+            if x1 <= event.x <= x2 and y1 <= event.y <= y2:
+                self.active_handle = handle
+                self.canvas.config(cursor="hand2")
+                break
+        if self.active_handle is None:
+            # If no handle is clicked, start pan
+            self.on_pan_start(event)
+
+    def on_mouse_drag(self, event):
+        if self.active_handle:
+            # Konvertē kanvasa koordinātas atpakaļ uz oriģinālā attēla koordinātām
+            new_x_original = (event.x - self.img_on_canvas_x) / self.zoom_factor
+            new_y_original = (event.y - self.img_on_canvas_y) / self.zoom_factor
+
+            # Ierobežo koordinātas attēla robežās
+            img_w, img_h = self.original_image_pil.size
+            new_x_original = max(0, min(new_x_original, img_w))
+            new_y_original = max(0, min(new_y_original, img_h))
+
+            self.corners[self.active_handle["index"]] = [new_x_original, new_y_original]
+
+            # Atjauno tikai aktīvo marķieri, lai uzlabotu veiktspēju
+            self.update_active_corner_display()
+
+        elif self.active_handle is None:
+            # Turpina pārvietošanu, ja nav aktīvs marķieris
+            self.on_pan_drag(event)
+
+    def update_active_corner_display(self):
+        """Atjauno tikai aktīvā stūra marķiera attēlojumu."""
+        if not self.active_handle or not self.corners or not self.canvas:
+            return
+
+        try:
+            i = self.active_handle["index"]
+            corner = self.corners[i]
+
+            x_on_canvas = self.img_on_canvas_x + corner[0] * self.zoom_factor
+            y_on_canvas = self.img_on_canvas_y + corner[1] * self.zoom_factor
+
+            handle_size = max(8, int(12 / self.zoom_factor))
+
+            # Atjauno marķiera pozīciju
+            self.canvas.coords(
+                self.active_handle["id"],
+                x_on_canvas - handle_size, y_on_canvas - handle_size,
+                x_on_canvas + handle_size, y_on_canvas + handle_size
+            )
+
+            # Atjauno teksta pozīciju
+            if "text_id" in self.active_handle:
+                self.canvas.coords(
+                    self.active_handle["text_id"],
+                    x_on_canvas, y_on_canvas - handle_size - 15
+                )
+
+            # Atjauno kontūru
+            if len(self.corners) == 4:
+                points = []
+                for corner in self.corners:
+                    points.extend([
+                        self.img_on_canvas_x + corner[0] * self.zoom_factor,
+                        self.img_on_canvas_y + corner[1] * self.zoom_factor
+                    ])
+
+                # Atrod un atjauno kontūras līnijas
+                for item in self.canvas.find_withtag("corner_lines"):
+                    self.canvas.coords(item, *points)
+
+        except tk.TclError:
+            # Canvas ir iznīcināts, ignorējam
+            pass
+        except Exception as e:
+            print(f"Kļūda atjaunojot stūra attēlojumu: {e}")
+
+    def on_mouse_up(self, event):
+        self.active_handle = None
+        self.canvas.config(cursor="arrow")
+        self.on_pan_end(event)  # Ensure pan cursor is reset
+
+    def apply_document_correction(self):
+        if self.original_image_pil is None or not self.corners:
+            messagebox.showwarning("Kļūda", "Nav attēla vai nav definēti stūri.")
+            return
+
+        try:
+            # Convert PIL image to OpenCV format
+            img_cv = np.array(self.original_image_pil.convert("RGB"))
+            img_cv = cv2.cvtColor(img_cv, cv2.COLOR_RGB2BGR)
+
+            # Apply perspective transform
+            warped_cv = self.four_point_transform(img_cv, self.corners)
+
+            # Convert back to PIL image
+            self.processed_image_pil = Image.fromarray(cv2.cvtColor(warped_cv, cv2.COLOR_BGR2RGB))
+
+            # Update the current image in the main app
+            if self.app.current_image_index != -1:
+                self.app.images[self.app.current_image_index]["processed_img"] = self.processed_image_pil
+                self.app.show_image_preview(self.processed_image_pil)
+                messagebox.showinfo("Korekcija veiksmīga", "Dokumenta robežas veiksmīgi koriģētas.")
+            else:
+                messagebox.showwarning("Korekcija veiksmīga",
+                                       "Dokumenta robežas veiksmīgi koriģētas, bet attēls nav aktīvs galvenajā sarakstā.")
+
+            self.preview_window.destroy()
+
+        except Exception as e:
+            messagebox.showerror("Kļūda", f"Neizdevās pielietot dokumenta korekciju: {e}")
+
+
+class OCRPDFApp(Window):
     """Galvenā lietojumprogrammas klase OCR un PDF ģenerēšanai."""
 
     def __init__(self):
@@ -840,8 +3356,12 @@ class OCRPDFApp(ttk.Window):
         loading_window = show_loading_screen(self)
         self.wait_window(loading_window)
 
-
-
+        # Jauni mainīgie attēla apgriešanai tieši uz kanvasa
+        self.cropping_mode = False  # Norāda, vai apgriešanas režīms ir aktīvs
+        self.crop_start_x = None
+        self.crop_start_y = None
+        self.crop_rect_id = None
+        self.current_crop_coords = None  # Glabās pēdējās apgriešanas koordinātas
         # Rādīt galveno logu
         self.deiconify()
 
@@ -853,15 +3373,77 @@ class OCRPDFApp(ttk.Window):
         self.geometry("1024x768")  # Samazināts noklusējuma izmērs
         self.minsize(800, 500)  # Samazināts minimālais izmērs
         self.settings = {}  # Inicializējiet settings kā tukšu vārdnīcu
-        self.scan_settings = {}  # JAUNS: Inicializējiet skenēšanas iestatījumus
-        self.settings_file = os.path.join(os.path.expanduser("~"), "ocr_pdf_settings.json")
-        self.scan_settings_file = os.path.join(os.path.expanduser("~"),
-                                               "ocr_scan_settings.json")  # JAUNS: Skenēšanas iestatījumu fails
-        self.pdf_archive_file = os.path.join(os.path.expanduser("~"), "ocr_pdf_archive.json")
-        self.scan_folder_path = tk.StringVar(value=os.path.join(os.path.expanduser("~"), "ScannedDocuments")) # JAUNS: Skenēšanas mapes ceļš
-        self.auto_scan_enabled = tk.BooleanVar(value=False) # JAUNS: Automātiskās skenēšanas ieslēgšana/izslēgšana
-        self.observer = None # JAUNS: Watchdog observers
+        # JAUNS: Skenēšanas iestatījumu mainīgie tagad tiek inicializēti no self.settings
+        self.scan_camera_index = tk.IntVar(value=self.settings.get("scan_camera_index", 1))
+        self.scan_camera_width = tk.IntVar(value=self.settings.get("scan_camera_width", 1280))
+        self.scan_camera_height = tk.IntVar(value=self.settings.get("scan_camera_height", 120))
+        self.scan_min_contour_area = tk.IntVar(value=self.settings.get("scan_min_contour_area", 2500))
+        self.scan_stable_threshold = tk.DoubleVar(value=self.settings.get("scan_stable_threshold", 0.8))
+        self.scan_stability_tolerance = tk.DoubleVar(value=self.settings.get("scan_stability_tolerance", 0.01))
+        self.scan_aspect_ratio_min = tk.DoubleVar(value=self.settings.get("scan_aspect_ratio_min", 0.4))
+        self.scan_aspect_ratio_max = tk.DoubleVar(value=self.settings.get("scan_aspect_ratio_max", 2.3))
+        self.scan_gaussian_blur_kernel = tk.IntVar(value=self.settings.get("scan_gaussian_blur_kernel", 9))
+        self.scan_adaptive_thresh_block_size = tk.IntVar(value=self.settings.get("scan_adaptive_thresh_block_size", 11))
+        self.scan_adaptive_thresh_c = tk.IntVar(value=self.settings.get("scan_adaptive_thresh_c", 3))
+        self.scan_canny_thresh1 = tk.IntVar(value=self.settings.get("scan_canny_thresh1", 610))
+        self.scan_canny_thresh2 = tk.IntVar(value=self.settings.get("scan_canny_thresh2", 190))
+        self.scan_brightness = tk.IntVar(value=self.settings.get("scan_brightness", 0))
+        self.scan_contrast = tk.IntVar(value=self.settings.get("scan_contrast", 0))
+        self.scan_saturation = tk.IntVar(value=self.settings.get("scan_saturation", 0))
+        self.scan_gamma = tk.DoubleVar(value=self.settings.get("scan_gamma", 1.0))
+        self.scan_use_color_detection = tk.BooleanVar(value=self.settings.get("scan_use_color_detection", False))
+        self.scan_target_color = tk.StringVar(value=self.settings.get("scan_target_color", "#FFFFFF"))
+        self.scan_color_tolerance = tk.IntVar(value=self.settings.get("scan_color_tolerance", 30))
+        self.scan_morphology_enabled = tk.BooleanVar(value=self.settings.get("scan_morphology_enabled", False))
+        self.scan_morphology_kernel_size = tk.IntVar(value=self.settings.get("scan_morphology_kernel_size", 3))
+        self.scan_edge_dilation = tk.IntVar(value=self.settings.get("scan_edge_dilation", 2))
+        self.document_scanner = DocumentScanner(self)
+        self.camera = None
+        self.camera_active = False
+        self.qr_code_frame_coords = None  # Pievienot šo rindu
+        self.camera = None  # Kameras objekts (piem., cv2.VideoCapture)
+        self.camera_active = False  # Kameras statusa karogs
+        self.scan_settings = {}  # Šī rinda paliek, lai saglabātu tukšu vārdnīcu, kas tiks aizpildīta ar sync_scan_settings_from_vars
+        # Iestatījumu faili joprojām tiek glabāti lietotāja profilā, jo tie ir lietotāja dati.
+        # Tie netiek iekļauti ZIP arhīvā, jo tie ir mainīgi.
+        self.settings_file = os.path.join(os.path.expanduser("~"), "AdvancedOCR_settings.json")
+        self.scan_settings_file = os.path.join(os.path.expanduser("~"), "AdvancedOCR_scan_settings.json")
+        self.pdf_archive_file = os.path.join(os.path.expanduser("~"), "AdvancedOCR_archive.json")
+        self.scan_folder_path = tk.StringVar(
+            value=os.path.join(os.path.expanduser("~"), "ScannedDocuments"))  # JAUNS: Skenēšanas mapes ceļš
+        self.auto_scan_enabled = tk.BooleanVar(value=False)  # JAUNS: Automātiskās skenēšanas ieslēgšana/izslēgšana
+        self.observer = None  # JAUNS: Watchdog observers
 
+        # Skenēšanas iestatījumi
+        self.scan_camera_index = tk.IntVar(value=1)
+        self.scan_camera_width = tk.IntVar(value=1920)
+        self.scan_camera_height = tk.IntVar(value=1080)
+        self.current_camera_index = 1
+
+
+        # JAUNS: Google Sheets iestatījumi
+        self.google_sheet_id = tk.StringVar(value=self.settings.get("google_sheet_id", ""))
+        self.google_sheet_name = tk.StringVar(value=self.settings.get("google_sheet_name", "OCR_Failu_Saraksts"))
+        self.google_sheet_credentials_path = tk.StringVar(
+            value=self.settings.get("google_sheet_credentials_path", "google_sheet_credentials.json"))
+        self.google_sheet_service = None  # Tiks inicializēts pēc autentifikācijas
+        self.google_drive_service = None  # Tiks inicializēts pēc autentifikācijas
+
+        # JAUNS: Mainīgie PDF priekšskatījumam "Papildu rīki" cilnē
+        # Šie mainīgie tagad atspoguļos self.images saraksta saturu
+        self.additional_tools_pdf_preview_canvas = None
+        self.additional_tools_pdf_preview_photo = None
+        self.additional_tools_current_pdf_document = None  # Tiks ielādēts, ja atlasītais fails ir PDF
+        self.additional_tools_current_pdf_page_count = 0
+        self.additional_tools_current_pdf_page_index = 0
+        self.additional_tools_pdf_preview_zoom_factor = 1.0
+        self.additional_tools_pdf_preview_pan_x = 0
+        self.additional_tools_pdf_preview_pan_y = 0
+        self.additional_tools_pdf_preview_start_pan_x = 0
+        self.additional_tools_pdf_preview_start_pan_y = 0
+        self.additional_tools_pdf_page_label = None
+        self.additional_tools_prev_page_button = None
+        self.additional_tools_next_page_button = None
 
         self.title("Advanced OCR uz PDF")
         # Sākotnējais izmērs un minimālais izmērs, kas labāk piemērots mazākiem ekrāniem
@@ -873,10 +3455,14 @@ class OCRPDFApp(ttk.Window):
         self.scan_settings_file = os.path.join(os.path.expanduser("~"),
                                                "ocr_scan_settings.json")  # JAUNS: Skenēšanas iestatījumu fails
         self.pdf_archive_file = os.path.join(os.path.expanduser("~"), "ocr_pdf_archive.json")
-        self.scan_folder_path = tk.StringVar(value=os.path.join(os.path.expanduser("~"), "ScannedDocuments")) # JAUNS: Skenēšanas mapes ceļš
-        self.auto_scan_enabled = tk.BooleanVar(value=False) # JAUNS: Automātiskās skenēšanas ieslēgšana/izslēgšana
-        self.observer = None # JAUNS: Watchdog observers
+        self.scan_folder_path = tk.StringVar(
+            value=os.path.join(os.path.expanduser("~"), "ScannedDocuments"))  # JAUNS: Skenēšanas mapes ceļš
+        self.auto_scan_enabled = tk.BooleanVar(value=False)  # JAUNS: Automātiskās skenēšanas ieslēgšana/izslēgšana
+        self.observer = None  # JAUNS: Watchdog observers
 
+        self.camera = None
+        self.camera_active = False
+        self.current_camera_index = 0  # Pievienot šo rindu
 
         # JAUNS: Attālinātās glabāšanas iestatījumi
         self.remote_storage_type = tk.StringVar(value=self.settings.get("remote_storage_type", "Local"))
@@ -894,17 +3480,29 @@ class OCRPDFApp(ttk.Window):
         # Iestatam callback pēc pilnīgas inicializācijas
         self.after(100, self.check_files_to_open)
 
-
         self.google_drive_folder_id = tk.StringVar(value=self.settings.get("google_drive_folder_id", ""))
-        self.google_drive_credentials_path = tk.StringVar(value=self.settings.get("google_drive_credentials_path", "credentials.json"))
+        self.google_drive_credentials_path = tk.StringVar(
+            value=self.settings.get("google_drive_credentials_path", "credentials.json"))
         self.google_drive_token_path = tk.StringVar(value=self.settings.get("google_drive_token_path", "token.json"))
 
         self.auto_upload_enabled = tk.BooleanVar(value=self.settings.get("auto_upload_enabled", False))
-        self.auto_upload_target = tk.StringVar(value=self.settings.get("auto_upload_target", "Local")) # Local, FTP, GoogleDrive
-
+        self.auto_upload_target = tk.StringVar(
+            value=self.settings.get("auto_upload_target", "Local"))  # Local, FTP, GoogleDrive
 
         self.file_listbox = tk.Listbox(self)  # Inicializē file_listbox
         self.file_listbox.bind('<<ListboxSelect>>', self.on_file_select)
+
+        # JAUNS: Mainīgie PDF priekšskatījumam
+        self.pdf_preview_canvas = None
+        self.pdf_preview_photo = None
+        self.current_pdf_document = None  # Lai glabātu atvērtu fitz dokumentu
+        self.current_pdf_page_count = 0
+        self.current_pdf_page_index = 0
+        self.pdf_preview_zoom_factor = 1.0
+        self.pdf_preview_pan_x = 0
+        self.pdf_preview_pan_y = 0
+        self.pdf_preview_start_pan_x = 0
+        self.pdf_preview_start_pan_y = 0
 
         # Konfigurē krāsas
         self.file_listbox.configure(
@@ -912,24 +3510,28 @@ class OCRPDFApp(ttk.Window):
             selectforeground='white'
         )
 
+        self._selected_line_index = -1 # Inicializē atlasītās rindas indeksu
+
+        # self.load_scan_settings()  # Šī rinda vairs nav nepieciešama, jo scan_settings tiek ielādēti caur app_settings
         self.load_app_settings()  # Ielādējiet galvenos iestatījumus
-        self.load_scan_settings()  # JAUNS: Ielādējiet skenēšanas iestatījumus
-        # JAUNS: Inicializējiet gaussian_blur_kernel_var
-        self.gaussian_blur_kernel_var = tk.IntVar(value=self.scan_settings.get("scan_gaussian_blur_kernel", 5))
+        # self.load_scan_settings()  # JAUNS: Ielādē skenēšanas iestatījumus
+        # self.init_scan_settings()  # Inicializē skenēšanas iestatījumus ar ielādētajām vērtībām
+
+        # self.gaussian_blur_kernel_var = tk.IntVar(value=self.scan_settings.get("scan_gaussian_blur_kernel", 5)) # Šī rinda vairs nav nepieciešama, jo tiek inicializēta init_scan_settings
         # Pievienojiet šo rindu, lai apstrādātu loga aizvēršanu
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
 
         self.images = []
         self.ocr_results = []
         self.stop_processing = False
-        self.default_save_path = os.path.expanduser("~")
+        self.default_save_path = r"C:\Users\edgar\Downloads\Advanced OCR"
         self.current_image_index = -1
         self.pdf_quality = "Vidēja"
         self.document_keywords = {
-            "id_card": ["id karte", "personas apliecība", "identity card", "passport", "pase", "vadītāja apliecība", "driver's license", "bankas karte", "credit card", "debit card"],
+            "id_card": ["id karte", "personas apliecība", "identity card", "passport", "pase", "vadītāja apliecība",
+                        "driver's license", "bankas karte", "credit card", "debit card"],
             # Pievienojiet citus atslēgvārdus, ja nepieciešams
         }
-
 
         self.internal_file_system = {"type": "folder", "name": "Sakne", "contents": []}
         self.current_folder = self.internal_file_system
@@ -968,19 +3570,35 @@ class OCRPDFApp(ttk.Window):
         self.binarize_var = tk.BooleanVar(value=False)
 
         # JAUNS: Skenēšanas iestatījumu mainīgie tagad tiek inicializēti no self.scan_settings
-        self.scan_camera_index = tk.IntVar(value=self.scan_settings.get("scan_camera_index", DEFAULT_CAMERA_INDEX))
+        self.scan_camera_index = tk.IntVar(value=self.scan_settings.get("scan_camera_index", 1))
         self.scan_camera_width = tk.IntVar(value=self.scan_settings.get("scan_camera_width", 1280))
-        self.scan_camera_height = tk.IntVar(value=self.scan_settings.get("scan_camera_height", 720))
-        self.scan_min_contour_area = tk.IntVar(value=self.scan_settings.get("scan_min_contour_area", 10000))
-        self.scan_stable_threshold = tk.DoubleVar(value=self.scan_settings.get("scan_stable_threshold", 1.5))
-        self.scan_stability_tolerance = tk.DoubleVar(value=self.scan_settings.get("scan_stability_tolerance", 0.02))
-        self.scan_aspect_ratio_min = tk.DoubleVar(value=self.scan_settings.get("scan_aspect_ratio_min", 0.5))
-        self.scan_aspect_ratio_max = tk.DoubleVar(value=self.scan_settings.get("scan_aspect_ratio_max", 2.0))
-        self.scan_gaussian_blur_kernel = tk.IntVar(value=self.scan_settings.get("scan_gaussian_blur_kernel", 5))
-        self.scan_adaptive_thresh_block_size = tk.IntVar(value=self.scan_settings.get("scan_adaptive_thresh_block_size", 11))
-        self.scan_adaptive_thresh_c = tk.IntVar(value=self.scan_settings.get("scan_adaptive_thresh_c", 2))
-        self.scan_canny_thresh1 = tk.IntVar(value=self.scan_settings.get("scan_canny_thresh1", 75))
-        self.scan_canny_thresh2 = tk.IntVar(value=self.scan_settings.get("scan_canny_thresh2", 200))
+        self.scan_camera_height = tk.IntVar(value=self.scan_settings.get("scan_camera_height", 120))
+        self.scan_min_contour_area = tk.IntVar(value=self.scan_settings.get("scan_min_contour_area", 2500))
+        self.scan_stable_threshold = tk.DoubleVar(value=self.scan_settings.get("scan_stable_threshold", 0.8))
+        self.scan_stability_tolerance = tk.DoubleVar(value=self.scan_settings.get("scan_stability_tolerance", 0.01))
+        self.scan_aspect_ratio_min = tk.DoubleVar(value=self.scan_settings.get("scan_aspect_ratio_min", 0.4))
+        self.scan_aspect_ratio_max = tk.DoubleVar(value=self.scan_settings.get("scan_aspect_ratio_max", 2.3))
+        self.scan_gaussian_blur_kernel = tk.IntVar(value=self.scan_settings.get("scan_gaussian_blur_kernel", 9))
+        self.scan_adaptive_thresh_block_size = tk.IntVar(
+            value=self.scan_settings.get("scan_adaptive_thresh_block_size", 11))
+        self.scan_adaptive_thresh_c = tk.IntVar(value=self.scan_settings.get("scan_adaptive_thresh_c", 3))
+        self.scan_canny_thresh1 = tk.IntVar(value=self.scan_settings.get("scan_canny_thresh1", 610))
+        self.scan_canny_thresh2 = tk.IntVar(value=self.scan_settings.get("scan_canny_thresh2", 190))
+
+        self.scan_settings = {}  # JAUNS: Inicializējiet skenēšanas iestatījumus
+        self.document_scanner = DocumentScanner(self)
+        self.camera = None
+        self.camera_active = False
+        self.qr_code_frame_coords = None  # Pievienot šo rindu
+        self.camera = None  # Kameras objekts (piem., cv2.VideoCapture)
+        self.camera_active = False  # Kameras statusa karogs
+
+        # Pievienojiet šo, lai nodrošinātu, ka kamera tiek atbrīvota, kad lietotne tiek aizvērta
+        self.protocol("WM_DELETE_WINDOW", self.on_closing)
+        self.settings_file = os.path.join(os.path.expanduser("~"), "ocr_pdf_settings.json")
+
+        self.init_scan_settings()  # Inicializē skenēšanas iestatījumus
+        # self.document_scanner = DocumentScanner(self)  # Inicializē DocumentScanner
 
         self.create_widgets()
         self.configure_grid()
@@ -1044,13 +3662,19 @@ class OCRPDFApp(ttk.Window):
             y = (self.winfo_screenheight() - self.winfo_height()) // 2
             self.geometry(f"+{x}+{y}")
 
+            # Pievienot metodes beigās
+            self.protocol("WM_DELETE_WINDOW", self.on_closing)
+
     def _get_physical_path_from_node(self, node):
-        """Atgriež pilnu fizisko ceļu uz mapi no mezgla struktūras."""
+        """Atgriež pilnu fizisko ceļu uz mapi vai failu no mezgla struktūras."""
         path_parts = []
         temp = node
+        # Traverse up the parent chain until the root (internal_file_system)
+        # Pievienots nosacījums, lai apstātos, ja temp ir None (aizsardzība)
         while temp and temp != self.internal_file_system:
             path_parts.insert(0, temp["name"])
             temp = temp.get("parent")
+        # Construct the full path starting from default_save_path
         return os.path.join(self.default_save_path, *path_parts)
 
     def check_files_to_open(self):
@@ -1060,7 +3684,538 @@ class OCRPDFApp(ttk.Window):
                 if os.path.exists(filepath):
                     self.open_files(filepath)
 
+    def show_document_detection_menu(self):
+        """Parāda dokumentu detekcijas logu ar pašreizējo attēlu."""
+        if self.current_image_index == -1:
+            messagebox.showwarning("Nav attēla", "Lūdzu, vispirms atlasiet attēlu, ko apstrādāt.")
+            return
+
+        current_image_pil = self.images[self.current_image_index]["processed_img"]
+        self.document_scanner.set_image(current_image_pil)
+        self.document_scanner.show_document_detection_preview()
+
+    def _get_physical_path_from_node(self, node):
+        """Atgriež pilnu fizisko ceļu uz mapi no mezgla struktūras."""
+        path_parts = []
+        temp = node
+        # Traverse up the parent chain until the root (internal_file_system)
+        while temp and temp != self.internal_file_system:
+            path_parts.insert(0, temp["name"])
+            temp = temp.get("parent")
+        # Construct the full path starting from default_save_path
+        return os.path.join(self.default_save_path, *path_parts)
+
+    def init_camera(self, force_camera_index=None):
+        """Kameras inicializācija ar iespēju norādīt konkrētu kameru."""
+        if not OPENCV_AVAILABLE:
+            messagebox.showwarning("Trūkst bibliotēkas", "Nepieciešams opencv-python.")
+            return False
+
+        # Ja kamera jau ir atvērta un nav pieprasīta konkrēta kamera
+        if self.camera is not None and force_camera_index is None:
+            return True
+
+        # Atbrīvo esošo kameru, ja vajag mainīt
+        if self.camera is not None:
+            self.camera.release()
+            self.camera = None
+            self.camera_active = False
+
+        try:
+            # Nosaka kameras indeksu
+            if force_camera_index is not None:
+                camera_index = force_camera_index
+                print(f"🎯 Piespiedu kārtā izmanto kameru: {camera_index}")
+            elif hasattr(self, 'scan_camera_index'):
+                camera_index = self.scan_camera_index.get()
+                print(f"📋 Iestatījumos norādītā kamera: {camera_index}")
+            else:
+                camera_index = 0
+                print("⚠️ Nav atrasts scan_camera_index, izmanto 0")
+
+            print(f"🔍 Mēģina atvērt kameru {camera_index}")
+
+            # Atver norādīto kameru
+            self.camera = cv2.VideoCapture(camera_index)
+            if not self.camera.isOpened():
+                print(f"❌ Kamera {camera_index} nav pieejama")
+                raise IOError(f"Kamera {camera_index} nav pieejama")
+
+            print(f"✅ Veiksmīgi atvērta kamera {camera_index}")
+
+            # Iestata kvalitāti
+            self.camera.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
+            self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
+            self.camera.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+
+            # Saglabā pašreizējo kameras indeksu
+            self.current_camera_index = camera_index
+
+            actual_width = int(self.camera.get(cv2.CAP_PROP_FRAME_WIDTH))
+            actual_height = int(self.camera.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            print(f"📐 Kamera {camera_index}: {actual_width}x{actual_height}")
+
+            self.camera_active = True
+            return True
+
+        except Exception as e:
+            print(f"❌ Kameras {camera_index} kļūda: {e}")
+            messagebox.showerror("Kameras kļūda", f"Nevar atvērt kameru {camera_index}: {e}")
+            if self.camera:
+                self.camera.release()
+            self.camera = None
+            self.camera_active = False
+            return False
+
+    def release_camera(self):
+        """Atbrīvo kameras resursus."""
+        if self.camera is not None:
+            self.camera.release()
+            self.camera = None
+            self.camera_active = False
+
+    def get_camera_frame(self):
+        """Iegūst pašreizējo kadru no kameras kā PIL attēlu."""
+        if self.camera is None or not self.camera_active:
+            return None
+
+        ret, frame = self.camera.read()
+        if not ret:
+            print("Neizdevās iegūt kadru no kameras.")
+            return None
+
+        # Pārveido OpenCV kadru par PIL attēlu
+        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        return Image.fromarray(frame_rgb)
+
+    def scan_document_with_camera(self):
+        """Ātri sāk dokumenta skenēšanu ar kameru."""
+
+        # DEBUG: Pārbauda kameras iestatījumus
+        print("🔍 DEBUG: Kameras iestatījumi:")
+        print(f"scan_camera_index eksistē: {hasattr(self, 'scan_camera_index')}")
+        if hasattr(self, 'scan_camera_index'):
+            print(f"scan_camera_index vērtība: {self.scan_camera_index.get()}")
+
+        # Vienkāršs progress bez animācijas
+        loading_window = tk.Toplevel(self)
+        loading_window.title("Kameru...")
+        loading_window.geometry("200x60")
+        loading_window.transient(self)
+        loading_window.resizable(False, False)
+
+        # Centrē
+        loading_window.update_idletasks()
+        x = (loading_window.winfo_screenwidth() // 2) - 100
+        y = (loading_window.winfo_screenheight() // 2) - 30
+        loading_window.geometry(f"200x60+{x}+{y}")
+
+        label = ttk.Label(loading_window, text="Atver kameru...")
+        label.pack(expand=True)
+        loading_window.update()
+
+        try:
+            # Ātri inicializē kameru
+            if not self.camera_active:
+                if not self.init_camera():
+                    loading_window.destroy()
+                    return
+
+            # Ātri iegūst kadru
+            first_frame = self.get_camera_frame()
+            loading_window.destroy()
+
+            if first_frame:
+                self.document_scanner.set_image(first_frame)
+                self.document_scanner.document_frozen = False
+                self.document_scanner.live_detected_corners = []
+                self.document_scanner.show_document_detection_preview()
+                self.document_scanner.start_live_scan()
+            else:
+                messagebox.showwarning("Kļūda", "Nav kameras kadra.")
+                self.release_camera()
+
+        except Exception as e:
+            loading_window.destroy()
+            messagebox.showerror("Kļūda", f"Kameras kļūda: {e}")
+
+    def on_closing(self):
+        """Apstrādā lietotnes aizvēršanu, atbrīvojot kameras resursus."""
+        self.release_camera()
+        self.save_app_settings()  # Saglabā iestatījumus pirms aizvēršanas
+        self.destroy()
+
+    def _display_pdf_page_on_canvas(self):
+        """Attēlo pašreizējo PDF lapu uz priekšskatījuma kanvasa."""
+        if not self.current_pdf_document or not self.pdf_preview_canvas:
+            return
+
+        try:
+            # Iegūst kanvasa izmērus
+            canvas_width = self.pdf_preview_canvas.winfo_width()
+            canvas_height = self.pdf_preview_canvas.winfo_height()
+
+            if canvas_width <= 1 or canvas_height <= 1:
+                # Kanvass vēl nav gatavs, mēģinām vēlreiz pēc īsa laika
+                self.after(50, self._display_pdf_page_on_canvas)
+                return
+
+            # Ielādē lapu
+            page = self.current_pdf_document.load_page(self.current_pdf_page_index)
+
+            # Konvertē lapu uz attēlu (PIL Image)
+            # Izmantojam DPI, lai kontrolētu attēla kvalitāti/izmēru
+            # Pielāgojam DPI, lai attēls ietilptu kanvasā, bet nebūtu pārāk liels
+            # Noklusējuma DPI 72 ir labs priekšskatījumam
+
+            # Aprēķina sākotnējo tālummaiņas koeficientu, lai lapa ietilptu kanvasā
+            # ņemot vērā gan platumu, gan augstumu.
+            fit_width_zoom = canvas_width / page.rect.width
+            fit_height_zoom = canvas_height / page.rect.height
+
+            # Izvēlas mazāko tālummaiņas koeficientu, lai visa lapa būtu redzama
+            initial_fit_zoom = min(fit_width_zoom, fit_height_zoom)
+
+            # Pielieto lietotāja definēto tālummaiņas faktoru virs sākotnējās pielāgošanas
+            zoom_factor_for_render = self.pdf_preview_zoom_factor * initial_fit_zoom
+
+            # Nodrošina minimālo tālummaiņu, lai attēls nebūtu pārāk mazs
+            # Var pielāgot 0.1, ja nepieciešams, bet parasti nav vajadzīgs, ja initial_fit_zoom ir pareizi aprēķināts
+            zoom_factor_for_render = max(0.1, zoom_factor_for_render)
+
+            pix = page.get_pixmap(matrix=fitz.Matrix(zoom_factor_for_render, zoom_factor_for_render))
+            img_pil = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+
+            # Pārvēršam PIL attēlu par PhotoImage
+            self.pdf_preview_photo = ImageTk.PhotoImage(img_pil)
+
+            # Notīra kanvasu un attēlo jauno attēlu
+            self.pdf_preview_canvas.delete("all")
+
+            # Aprēķina attēla pozīciju ar pārvietošanu
+            img_width, img_height = img_pil.size
+            x = (canvas_width - img_width) / 2 + self.pdf_preview_pan_x
+            y = (canvas_height - img_height) / 2 + self.pdf_preview_pan_y
+
+            self.pdf_preview_canvas.create_image(x, y, anchor="nw", image=self.pdf_preview_photo)
+            self.pdf_preview_canvas.image = self.pdf_preview_photo # Saglabā atsauci
+
+            # Atjaunina lapas numura etiķeti
+            self.pdf_page_label.config(text=f"Lapa: {self.current_pdf_page_index + 1}/{self.current_pdf_page_count}")
+
+            # Atjaunina navigācijas pogu stāvokli
+            self.prev_page_button.config(state=tk.NORMAL if self.current_pdf_page_index > 0 else tk.DISABLED)
+            self.next_page_button.config(state=tk.NORMAL if self.current_pdf_page_index < self.current_pdf_page_count - 1 else tk.DISABLED)
+
+        except Exception as e:
+            print(f"Kļūda attēlojot PDF lapu: {e}")
+            self.pdf_preview_canvas.delete("all")
+            self.pdf_preview_canvas.create_text(
+                self.pdf_preview_canvas.winfo_width() / 2, self.pdf_preview_canvas.winfo_height() / 2,
+                text=f"Nevarēja ielādēt lapu:\n{e}", fill="red", font=("Helvetica", 12),
+                justify="center"
+            )
+            self.pdf_page_label.config(text="Lapa: Kļūda")
+            self.prev_page_button.config(state=tk.DISABLED)
+            self.next_page_button.config(state=tk.DISABLED)
+
+
+    def _load_pdf_for_preview(self, filepath):
+        """Ielādē PDF dokumentu priekšskatījumam."""
+        # Aizver iepriekšējo dokumentu, ja tāds ir
+        if self.current_pdf_document:
+            self.current_pdf_document.close()
+            self.current_pdf_document = None
+
+        self.pdf_preview_canvas.delete("all")
+        self.pdf_preview_canvas.create_text(
+            self.pdf_preview_canvas.winfo_width() / 2, self.pdf_preview_canvas.winfo_height() / 2,
+            text="Ielādē...", fill="white", font=("Helvetica", 14)
+        )
+        self.pdf_page_label.config(text="Ielādē...")
+        self.prev_page_button.config(state=tk.DISABLED)
+        self.next_page_button.config(state=tk.DISABLED)
+        self.update_idletasks() # Atjaunina UI
+
+        try:
+            self.current_pdf_document = fitz.open(filepath)
+            self.current_pdf_page_count = self.current_pdf_document.page_count
+            self.current_pdf_page_index = 0 # Sākam ar pirmo lapu
+            self.pdf_preview_zoom_factor = 1.0 # Atiestatām tālummaiņu
+            self.pdf_preview_pan_x = 0 # Atiestatām pārvietošanu
+            self.pdf_preview_pan_y = 0
+
+            self._display_pdf_page_on_canvas()
+
+        except Exception as e:
+            messagebox.showerror("PDF ielādes kļūda", f"Nevarēja ielādēt PDF priekšskatījumam:\n{e}")
+            self.current_pdf_document = None
+            self.current_pdf_page_count = 0
+            self.current_pdf_page_index = 0
+            self.pdf_preview_canvas.delete("all")
+            self.pdf_preview_canvas.create_text(
+                self.pdf_preview_canvas.winfo_width() / 2, self.pdf_preview_canvas.winfo_height() / 2,
+                text=f"Nevarēja ielādēt PDF:\n{e}", fill="red", font=("Helvetica", 12),
+                justify="center"
+            )
+            self.pdf_page_label.config(text="Lapa: Kļūda")
+            self.prev_page_button.config(state=tk.DISABLED)
+            self.next_page_button.config(state=tk.DISABLED)
+
+
+    def _show_prev_pdf_page(self):
+        """Parāda iepriekšējo PDF lapu priekšskatījumā."""
+        if self.current_pdf_document and self.current_pdf_page_index > 0:
+            self.current_pdf_page_index -= 1
+            self._display_pdf_page_on_canvas()
+
+    def _load_pdf_for_additional_tools_preview(self, filepath):
+        """Ielādē PDF dokumentu priekšskatījumam "Papildu rīki" cilnē."""
+        if self.additional_tools_current_pdf_document:
+            self.additional_tools_current_pdf_document.close()
+            self.additional_tools_current_pdf_document = None
+
+        self.additional_tools_pdf_preview_canvas.delete("all")
+        self.additional_tools_pdf_preview_canvas.create_text(
+            self.additional_tools_pdf_preview_canvas.winfo_width() / 2, self.additional_tools_pdf_preview_canvas.winfo_height() / 2,
+            text="Ielādē...", fill="white", font=("Helvetica", 14)
+        )
+        if self.additional_tools_pdf_page_label:
+            self.additional_tools_pdf_page_label.config(text="Ielādē...")
+        if self.additional_tools_prev_page_button:
+            self.additional_tools_prev_page_button.config(state=tk.DISABLED)
+        if self.additional_tools_next_page_button:
+            self.additional_tools_next_page_button.config(state=tk.DISABLED)
+        self.update_idletasks()
+
+        try:
+            self.additional_tools_current_pdf_document = fitz.open(filepath)
+            self.additional_tools_current_pdf_page_count = self.additional_tools_current_pdf_document.page_count
+            self.additional_tools_current_pdf_page_index = 0
+            self.additional_tools_pdf_preview_zoom_factor = 1.0
+            self.additional_tools_pdf_preview_pan_x = 0
+            self.additional_tools_pdf_preview_pan_y = 0
+
+            self._display_pdf_page_on_additional_tools_canvas()
+
+        except Exception as e:
+            messagebox.showerror("PDF ielādes kļūda (Papildu rīki)", f"Nevarēja ielādēt PDF priekšskatījumam:\n{e}")
+            self.additional_tools_current_pdf_document = None
+            self.additional_tools_current_pdf_page_count = 0
+            self.additional_tools_current_pdf_page_index = 0
+            self.additional_tools_pdf_preview_canvas.delete("all")
+            self.additional_tools_pdf_preview_canvas.create_text(
+                self.additional_tools_pdf_preview_canvas.winfo_width() / 2, self.additional_tools_pdf_preview_canvas.winfo_height() / 2,
+                text=f"Nevarēja ielādēt PDF:\n{e}", fill="red", font=("Helvetica", 12),
+                justify="center"
+            )
+            if self.additional_tools_pdf_page_label:
+                self.additional_tools_pdf_page_label.config(text="Lapa: Kļūda")
+            if self.additional_tools_prev_page_button:
+                self.additional_tools_prev_page_button.config(state=tk.DISABLED)
+            if self.additional_tools_next_page_button:
+                self.additional_tools_next_page_button.config(state=tk.DISABLED)
+
+    def _display_pdf_page_on_additional_tools_canvas(self):
+        """Attēlo pašreizējo PDF lapu uz priekšskatījuma kanvasa "Papildu rīki" cilnē."""
+        if not self.additional_tools_current_pdf_document or not self.additional_tools_pdf_preview_canvas:
+            return
+
+        try:
+            canvas_width = self.additional_tools_pdf_preview_canvas.winfo_width()
+            canvas_height = self.additional_tools_pdf_preview_canvas.winfo_height()
+
+            if canvas_width <= 1 or canvas_height <= 1:
+                self.after(50, self._display_pdf_page_on_additional_tools_canvas)
+                return
+
+            page = self.additional_tools_current_pdf_document.load_page(self.additional_tools_current_pdf_page_index)
+
+            fit_width_zoom = canvas_width / page.rect.width
+            fit_height_zoom = canvas_height / page.rect.height
+            initial_fit_zoom = min(fit_width_zoom, fit_height_zoom)
+            zoom_factor_for_render = self.additional_tools_pdf_preview_zoom_factor * initial_fit_zoom
+            zoom_factor_for_render = max(0.1, zoom_factor_for_render)
+
+            pix = page.get_pixmap(matrix=fitz.Matrix(zoom_factor_for_render, zoom_factor_for_render))
+            img_pil = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+
+            self.additional_tools_pdf_preview_photo = ImageTk.PhotoImage(img_pil)
+
+            self.additional_tools_pdf_preview_canvas.delete("all")
+
+            img_width, img_height = img_pil.size
+            x = (canvas_width - img_width) / 2 + self.additional_tools_pdf_preview_pan_x
+            y = (canvas_height - img_height) / 2 + self.additional_tools_pdf_preview_pan_y
+
+            self.additional_tools_pdf_preview_canvas.create_image(x, y, anchor="nw", image=self.additional_tools_pdf_preview_photo)
+            self.additional_tools_pdf_preview_canvas.image = self.additional_tools_pdf_preview_photo
+
+            if self.additional_tools_pdf_page_label:
+                self.additional_tools_pdf_page_label.config(text=f"Lapa: {self.additional_tools_current_pdf_page_index + 1}/{self.additional_tools_current_pdf_page_count}")
+
+            if self.additional_tools_prev_page_button:
+                self.additional_tools_prev_page_button.config(state=tk.NORMAL if self.additional_tools_current_pdf_page_index > 0 else tk.DISABLED)
+            if self.additional_tools_next_page_button:
+                self.additional_tools_next_page_button.config(state=tk.NORMAL if self.additional_tools_current_pdf_page_index < self.additional_tools_current_pdf_page_count - 1 else tk.DISABLED)
+
+        except Exception as e:
+            print(f"Kļūda attēlojot PDF lapu (Papildu rīki): {e}")
+            self.additional_tools_pdf_preview_canvas.delete("all")
+            self.additional_tools_pdf_preview_canvas.create_text(
+                self.additional_tools_pdf_preview_canvas.winfo_width() / 2, self.additional_tools_pdf_preview_canvas.winfo_height() / 2,
+                text=f"Nevarēja ielādēt lapu:\n{e}", fill="red", font=("Helvetica", 12),
+                justify="center"
+            )
+            if self.additional_tools_pdf_page_label:
+                self.additional_tools_pdf_page_label.config(text="Lapa: Kļūda")
+            if self.additional_tools_prev_page_button:
+                self.additional_tools_prev_page_button.config(state=tk.DISABLED)
+            if self.additional_tools_next_page_button:
+                self.additional_tools_next_page_button.config(state=tk.DISABLED)
+
+    def _show_prev_additional_tools_pdf_page(self):
+        """
+        Parāda iepriekšējo lapu/attēlu priekšskatījumā "Papildu rīki" cilnē.
+        Navigē pa PDF lapām, ja atlasīts PDF, vai pa self.images sarakstu, ja atlasīts attēls.
+        """
+        if self.additional_tools_current_pdf_document:  # Ja pašlaik tiek rādīts PDF
+            if self.additional_tools_current_pdf_page_index > 0:
+                self.additional_tools_current_pdf_page_index -= 1
+                self._display_pdf_page_on_additional_tools_canvas()
+        elif self.current_image_index > 0:  # Ja pašlaik tiek rādīts attēls no self.images
+            self.current_image_index -= 1
+            self.file_listbox.selection_clear(0, tk.END)
+            self.file_listbox.selection_set(self.current_image_index)
+            self.file_listbox.activate(self.current_image_index)
+            self.file_listbox.see(self.current_image_index)
+            self._update_additional_tools_pdf_preview()  # Atjaunina priekšskatījumu
+            self.show_image_preview(
+                self.images[self.current_image_index]["processed_img"])  # Atjaunina arī attēlu apstrādes cilni
+
+    def _show_next_additional_tools_pdf_page(self):
+        """
+        Parāda nākamo lapu/attēlu priekšskatījumā "Papildu rīki" cilnē.
+        Navigē pa PDF lapām, ja atlasīts PDF, vai pa self.images sarakstu, ja atlasīts attēls.
+        """
+        if self.additional_tools_current_pdf_document:  # Ja pašlaik tiek rādīts PDF
+            if self.additional_tools_current_pdf_page_index < self.additional_tools_current_pdf_page_count - 1:
+                self.additional_tools_current_pdf_page_index += 1
+                self._display_pdf_page_on_additional_tools_canvas()
+        elif self.current_image_index < len(self.images) - 1:  # Ja pašlaik tiek rādīts attēls no self.images
+            self.current_image_index += 1
+            self.file_listbox.selection_clear(0, tk.END)
+            self.file_listbox.selection_set(self.current_image_index)
+            self.file_listbox.activate(self.current_image_index)
+            self.file_listbox.see(self.current_image_index)
+            self._update_additional_tools_pdf_preview()  # Atjaunina priekšskatījumu
+            self.show_image_preview(
+                self.images[self.current_image_index]["processed_img"])  # Atjaunina arī attēlu apstrādes cilni
+
+    def _on_additional_tools_pdf_preview_canvas_resize(self, event):
+        """Apstrādā PDF priekšskatījuma kanvasa izmēru maiņu "Papildu rīki" cilnē."""
+        self._display_pdf_page_on_additional_tools_canvas()
+
+    def _on_additional_tools_pdf_preview_mouse_wheel(self, event):
+        """Apstrādā peles rullīša notikumus PDF priekšskatījuma tālummaiņai "Papildu rīki" cilnē."""
+        if event.num == 5 or event.delta == -120:
+            self.additional_tools_pdf_preview_zoom_factor = max(0.1, self.additional_tools_pdf_preview_zoom_factor - 0.1)
+        if event.num == 4 or event.delta == 120:
+            self.additional_tools_pdf_preview_zoom_factor = min(5.0, self.additional_tools_pdf_preview_zoom_factor + 0.1)
+        self._display_pdf_page_on_additional_tools_canvas()
+
+    def _on_additional_tools_pdf_preview_pan_start(self, event):
+        """Sāk PDF priekšskatījuma pārvietošanu (pan) "Papildu rīki" cilnē."""
+        self.additional_tools_pdf_preview_start_pan_x = event.x - self.additional_tools_pdf_preview_pan_x
+        self.additional_tools_pdf_preview_start_pan_y = event.y - self.additional_tools_pdf_preview_pan_y
+        self.additional_tools_pdf_preview_canvas.config(cursor="fleur")
+
+    def _on_additional_tools_pdf_preview_pan_drag(self, event):
+        """Pārvieto PDF priekšskatījumu, velkot peli "Papildu rīki" cilnē."""
+        self.additional_tools_pdf_preview_pan_x = event.x - self.additional_tools_pdf_preview_start_pan_x
+        self.additional_tools_pdf_preview_pan_y = event.y - self.additional_tools_pdf_preview_start_pan_y
+        self._display_pdf_page_on_additional_tools_canvas()
+
+    def _on_additional_tools_pdf_preview_pan_end(self, event):
+        """Beidz PDF priekšskatījuma pārvietošanu "Papildu rīki" cilnē."""
+        self.additional_tools_pdf_preview_canvas.config(cursor="arrow")
+
+    def _clear_additional_tools_pdf_preview(self):
+        """Notīra PDF priekšskatījumu un atbrīvo resursus "Papildu rīki" cilnē."""
+        if self.additional_tools_current_pdf_document:
+            self.additional_tools_current_pdf_document.close()
+            self.additional_tools_current_pdf_document = None
+        if self.additional_tools_pdf_preview_canvas:
+            self.additional_tools_pdf_preview_canvas.delete("all")
+        self.additional_tools_pdf_preview_photo = None
+        self.additional_tools_current_pdf_page_count = 0
+        self.additional_tools_current_pdf_page_index = 0
+        if self.additional_tools_pdf_page_label:
+            self.additional_tools_pdf_page_label.config(text="Lapa: 0/0")
+        if self.additional_tools_prev_page_button:
+            self.additional_tools_prev_page_button.config(state=tk.DISABLED)
+        if self.additional_tools_next_page_button:
+            self.additional_tools_next_page_button.config(state=tk.DISABLED)
+
+    #def _load_pdf_for_additional_tools_preview_from_dialog(self):
+        #"""Atver failu dialogu un ielādē PDF priekšskatījumam "Papildu rīki" cilnē."""
+        #filepath = filedialog.askopenfilename(
+            #title="Izvēlēties PDF failu priekšskatījumam",
+            #filetypes=[("PDF faili", "*.pdf"), ("Visi faili", "*.*")]
+        #)
+        #if filepath:
+            #self._load_pdf_for_additional_tools_pdf_preview(filepath)
+
+
+    def _show_next_pdf_page(self):
+        """Parāda nākamo PDF lapu priekšskatījumā."""
+        if self.current_pdf_document and self.current_pdf_page_index < self.current_pdf_page_count - 1:
+            self.current_pdf_page_index += 1
+            self._display_pdf_page_on_canvas()
+
+    def _on_pdf_preview_canvas_resize(self, event):
+        """Apstrādā PDF priekšskatījuma kanvasa izmēru maiņu."""
+        self._display_pdf_page_on_canvas()
+
+    def _on_pdf_preview_mouse_wheel(self, event):
+        """Apstrādā peles rullīša notikumus PDF priekšskatījuma tālummaiņai."""
+        if event.num == 5 or event.delta == -120:  # Tuvināt
+            self.pdf_preview_zoom_factor = max(0.1, self.pdf_preview_zoom_factor - 0.1)
+        if event.num == 4 or event.delta == 120:  # Attālināt
+            self.pdf_preview_zoom_factor = min(5.0, self.pdf_preview_zoom_factor + 0.1)
+        self._display_pdf_page_on_canvas()
+
+    def _on_pdf_preview_pan_start(self, event):
+        """Sāk PDF priekšskatījuma pārvietošanu (pan)."""
+        self.pdf_preview_start_pan_x = event.x - self.pdf_preview_pan_x
+        self.pdf_preview_start_pan_y = event.y - self.pdf_preview_pan_y
+        self.pdf_preview_canvas.config(cursor="fleur")
+
+    def _on_pdf_preview_pan_drag(self, event):
+        """Pārvieto PDF priekšskatījumu, velkot peli."""
+        self.pdf_preview_pan_x = event.x - self.pdf_preview_start_pan_x
+        self.pdf_preview_pan_y = event.y - self.pdf_preview_start_pan_y
+        self._display_pdf_page_on_canvas()
+
+    def _on_pdf_preview_pan_end(self, event):
+        """Beidz PDF priekšskatījuma pārvietošanu."""
+        self.pdf_preview_canvas.config(cursor="arrow")
+
+    def _clear_pdf_preview(self):
+        """Notīra PDF priekšskatījumu un atbrīvo resursus."""
+        if self.current_pdf_document:
+            self.current_pdf_document.close()
+            self.current_pdf_document = None
+        self.pdf_preview_canvas.delete("all")
+        self.pdf_preview_photo = None
+        self.current_pdf_page_count = 0
+        self.current_pdf_page_index = 0
+        self.pdf_page_label.config(text="Lapa: 0/0")
+        self.prev_page_button.config(state=tk.DISABLED)
+        self.next_page_button.config(state=tk.DISABLED)
+
     def load_app_settings(self):
+
         """Ielādē lietotnes iestatījumus no JSON faila"""
         # Sākumā iestata noklusējuma vērtības visiem iestatījumiem
         self.settings.setdefault("output_format", "pdf")
@@ -1092,8 +4247,8 @@ class OCRPDFApp(ttk.Window):
         self.settings.setdefault("window_height", 768)  # Jaunais noklusējuma augstums
         self.settings.setdefault("window_x", 0)
         self.settings.setdefault("window_y", 0)
-        self.settings.setdefault("scan_folder_path", os.path.join(os.path.expanduser("~"), "ScannedDocuments")) # JAUNS
-        self.settings.setdefault("auto_scan_enabled", False) # JAUNS
+        self.settings.setdefault("scan_folder_path", os.path.join(os.path.expanduser("~"), "ScannedDocuments"))  # JAUNS
+        self.settings.setdefault("auto_scan_enabled", False)  # JAUNS
         # JAUNS: Attālinātās glabāšanas noklusējuma vērtības
         self.settings.setdefault("remote_storage_type", "Local")
         self.settings.setdefault("ftp_host", "")
@@ -1110,15 +4265,45 @@ class OCRPDFApp(ttk.Window):
         # JAUNS: ID koda iestatījumu noklusējuma vērtības
         self.settings.setdefault("add_id_code_to_pdf", False)
         self.settings.setdefault("id_code_type", "QR")
-        self.settings.setdefault("id_code_position", "bottom_right")
+        self.settings.setdefault("id_code_position", "bottom_right")  # MAINĪTS: no "bottom-right" uz "bottom_right"
 
         # JAUNS: ID koda iestatījumi
-        self.settings.setdefault("add_id_code_to_pdf", False)
-        self.settings.setdefault("id_code_type", "QR") # "QR" vai "Barcode"
-        self.settings.setdefault("id_code_position", "bottom_right") # "top_right", "bottom_right", "bottom_left", "top_left"
+        self.settings["add_id_code_to_pdf"] = self.settings.get("add_id_code_to_pdf",
+                                                                False)  # Jāpārliecinās, ka vērtība ir iestatīta
+        self.settings["id_code_type"] = self.settings.get("id_code_type", "QR")
+        self.settings["id_code_position"] = self.settings.get("id_code_position",
+                                                              "bottom_right")  # MAINĪTS: no "bottom-right" uz "bottom_right"
+
+        # JAUNS: Google Sheets iestatījumu noklusējuma vērtības
+        self.settings.setdefault("google_sheet_id", "")
+        self.settings.setdefault("google_sheet_name", "OCR_Failu_Saraksts")
+        self.settings.setdefault("google_sheet_credentials_path", "google_sheet_credentials.json")
 
 
-
+        # JAUNS: Attēla uzlabojumu iestatījumu noklusējuma vērtības
+        self.settings.setdefault("scan_brightness", 0)
+        self.settings.setdefault("scan_contrast", 0)
+        self.settings.setdefault("scan_saturation", 0)
+        self.settings.setdefault("scan_gamma", 1.0)
+        self.settings.setdefault("scan_use_color_detection", False)
+        self.settings.setdefault("scan_target_color", "#FFFFFF")
+        self.settings.setdefault("scan_color_tolerance", 30)
+        self.settings.setdefault("scan_morphology_enabled", False)
+        self.settings.setdefault("scan_morphology_kernel_size", 3)
+        self.settings.setdefault("scan_edge_dilation", 2)
+        self.settings.setdefault("scan_camera_index", 0)
+        self.settings.setdefault("scan_camera_width", 1280)
+        self.settings.setdefault("scan_camera_height", 120)
+        self.settings.setdefault("scan_min_contour_area", 2500)
+        self.settings.setdefault("scan_stable_threshold", 0.8)
+        self.settings.setdefault("scan_stability_tolerance", 0.01)
+        self.settings.setdefault("scan_aspect_ratio_min", 0.4)
+        self.settings.setdefault("scan_aspect_ratio_max", 2.3)
+        self.settings.setdefault("scan_gaussian_blur_kernel", 9)
+        self.settings.setdefault("scan_adaptive_thresh_block_size", 11)
+        self.settings.setdefault("scan_adaptive_thresh_c", 3)
+        self.settings.setdefault("scan_canny_thresh1", 610)
+        self.settings.setdefault("scan_canny_thresh2", 190)
 
         if os.path.exists(self.settings_file):
             try:
@@ -1131,34 +4316,42 @@ class OCRPDFApp(ttk.Window):
                 return False
         return False
 
-
     def load_scan_settings(self):
-        """JAUNS: Ielādē skenēšanas iestatījumus no JSON faila."""
-        # Noklusējuma vērtības skenēšanas iestatījumiem
-        self.scan_settings.setdefault("scan_camera_index", DEFAULT_CAMERA_INDEX)
-        self.scan_settings.setdefault("scan_camera_width", 1280)
-        self.scan_settings.setdefault("scan_camera_height", 720)
-        self.scan_settings.setdefault("scan_min_contour_area", 10000)
-        self.scan_settings.setdefault("scan_stable_threshold", 1.5)
-        self.scan_settings.setdefault("scan_stability_tolerance", 0.02)
-        self.scan_settings.setdefault("scan_aspect_ratio_min", 0.5)
-        self.scan_settings.setdefault("scan_aspect_ratio_max", 2.0)
-        self.scan_settings.setdefault("scan_gaussian_blur_kernel", 5)
-        self.scan_settings.setdefault("scan_adaptive_thresh_block_size", 11)
-        self.scan_settings.setdefault("scan_adaptive_thresh_c", 2)
-        self.scan_settings.setdefault("scan_canny_thresh1", 75)
-        self.scan_settings.setdefault("scan_canny_thresh2", 200)
-
-        if os.path.exists(self.scan_settings_file):
-            try:
+        """Ielādē skenēšanas iestatījumus no JSON faila."""
+        try:
+            if os.path.exists(self.scan_settings_file):
                 with open(self.scan_settings_file, 'r', encoding='utf-8') as f:
-                    loaded_scan_settings = json.load(f)
-                    self.scan_settings.update(loaded_scan_settings)
-                return True
-            except Exception as e:
-                print(f"Nevarēja ielādēt skenēšanas iestatījumus: {e}")
-                return False
-        return False
+                    self.scan_settings = json.load(f)
+            else:
+                # JAUNS: Ja fails neeksistē, iestatām noklusējuma vērtības
+                self.scan_settings = {
+                    "scan_camera_index": 0,
+                    "scan_camera_width": 1280,
+                    "scan_camera_height": 120,
+                    "scan_min_contour_area": 2500,
+                    "scan_stable_threshold": 0.8,
+                    "scan_stability_tolerance": 0.01,
+                    "scan_aspect_ratio_min": 0.4,
+                    "scan_aspect_ratio_max": 2.3,
+                    "scan_gaussian_blur_kernel": 9,
+                    "scan_adaptive_thresh_block_size": 11,
+                    "scan_adaptive_thresh_c": 3,
+                    "scan_canny_thresh1": 610,
+                    "scan_canny_thresh2": 190,
+                    "scan_brightness": 0,
+                    "scan_contrast": 0,
+                    "scan_saturation": 0,
+                    "scan_gamma": 1.0,
+                    "scan_use_color_detection": False,
+                    "scan_target_color": "#FFFFFF",
+                    "scan_color_tolerance": 30,
+                    "scan_morphology_enabled": False,
+                    "scan_morphology_kernel_size": 3,
+                    "scan_edge_dilation": 2
+                }
+        except Exception as e:
+            print(f"Kļūda ielādējot skenēšanas iestatījumus: {e}")
+            self.scan_settings = {}
 
     def save_app_settings(self):
         """Saglabā lietotnes iestatījumus JSON failā"""
@@ -1172,8 +4365,8 @@ class OCRPDFApp(ttk.Window):
         self.settings["window_height"] = self.winfo_height()
         self.settings["window_x"] = self.winfo_x()
         self.settings["window_y"] = self.winfo_y()
-        self.settings["scan_folder_path"] = self.scan_folder_path.get() # JAUNS
-        self.settings["auto_scan_enabled"] = self.auto_scan_enabled.get() # JAUNS
+        self.settings["scan_folder_path"] = self.scan_folder_path.get()  # JAUNS
+        self.settings["auto_scan_enabled"] = self.auto_scan_enabled.get()  # JAUNS
         # JAUNS: Attālinātās glabāšanas iestatījumi
         self.settings["remote_storage_type"] = self.remote_storage_type.get()
         self.settings["ftp_host"] = self.ftp_host.get()
@@ -1188,12 +4381,53 @@ class OCRPDFApp(ttk.Window):
         self.settings["auto_upload_enabled"] = self.auto_upload_enabled.get()
         self.settings["auto_upload_target"] = self.auto_upload_target.get()
         # JAUNS: ID koda iestatījumi
-        self.settings["add_id_code_to_pdf"] = self.settings.get("add_id_code_to_pdf", False) # Jāpārliecinās, ka vērtība ir iestatīta
+        self.settings["add_id_code_to_pdf"] = self.settings.get("add_id_code_to_pdf",
+                                                                False)  # Jāpārliecinās, ka vērtība ir iestatīta
         self.settings["id_code_type"] = self.settings.get("id_code_type", "QR")
-        self.settings["id_code_position"] = self.settings.get("id_code_position", "bottom_right")
+        self.settings["id_code_position"] = self.settings.get("id_code_position",
+                                                              "bottom_right")  # MAINĪTS: no "bottom-right" uz "bottom_right"
 
+        # JAUNS: Attēla uzlabojumu iestatījumu saglabāšana
+        self.settings["scan_brightness"] = self.scan_brightness.get()
+        self.settings["scan_contrast"] = self.scan_contrast.get()
+        self.settings["scan_saturation"] = self.scan_saturation.get()
+        self.settings["scan_gamma"] = self.scan_gamma.get()
+        self.settings["scan_use_color_detection"] = self.scan_use_color_detection.get()
+        self.settings["scan_target_color"] = self.scan_target_color.get()
+        self.settings["scan_color_tolerance"] = self.scan_color_tolerance.get()
+        self.settings["scan_morphology_enabled"] = self.scan_morphology_enabled.get()
+        self.settings["scan_morphology_kernel_size"] = self.scan_morphology_kernel_size.get()
+        self.settings["scan_edge_dilation"] = self.scan_edge_dilation.get()
+        self.settings["scan_camera_index"] = self.scan_camera_index.get()
+        self.settings["scan_camera_width"] = self.scan_camera_width.get()
+        self.settings["scan_camera_height"] = self.scan_camera_height.get()
+        self.settings["scan_min_contour_area"] = self.scan_min_contour_area.get()
+        self.settings["scan_stable_threshold"] = self.scan_stable_threshold.get()
+        self.settings["scan_stability_tolerance"] = self.scan_stability_tolerance.get()
+        self.settings["scan_aspect_ratio_min"] = self.scan_aspect_ratio_min.get()
+        self.settings["scan_aspect_ratio_max"] = self.scan_aspect_ratio_max.get()
+        self.settings["scan_gaussian_blur_kernel"] = self.scan_gaussian_blur_kernel.get()
+        self.settings["scan_adaptive_thresh_block_size"] = self.scan_adaptive_thresh_block_size.get()
+        self.settings["scan_adaptive_thresh_c"] = self.scan_adaptive_thresh_c.get()
+        self.settings["scan_canny_thresh1"] = self.scan_canny_thresh1.get()
+        self.settings["scan_canny_thresh2"] = self.scan_canny_thresh2.get()
 
-
+        # JAUNS: Google Sheets iestatījumi
+        # Definējam StringVar mainīgos
+        self.google_sheet_id = tk.StringVar(value=self.settings.get("google_sheet_id", ""))
+        self.google_sheet_name = tk.StringVar(value=self.settings.get("google_sheet_name", "OCR_Failu_Saraksts"))
+        self.google_sheet_credentials_path = tk.StringVar(
+            value=self.settings.get("google_sheet_credentials_path", "google_sheet_credentials.json"))
+        self.auto_upload_enabled = tk.BooleanVar(value=self.settings.get("auto_upload_enabled", False))
+        self.remote_storage_type = tk.StringVar(value=self.settings.get("remote_storage_type", ""))
+        self.google_drive_folder_id = tk.StringVar(value=self.settings.get("google_drive_folder_id", ""))
+        # Tagad varam pievienot trace_add
+        self.google_sheet_id.trace_add("write", lambda *args: self.save_app_settings())
+        self.google_sheet_name.trace_add("write", lambda *args: self.save_app_settings())
+        self.google_sheet_credentials_path.trace_add("write", lambda *args: self.save_app_settings())
+        self.auto_upload_enabled.trace_add("write", lambda *args: self.save_app_settings())
+        self.remote_storage_type.trace_add("write", lambda *args: self.save_app_settings())
+        self.google_drive_folder_id.trace_add("write", lambda *args: self.save_app_settings())
 
         # Saglabā arī citus iestatījumus, kas tiek mainīti SettingsWindow
         self.settings["default_save_path"] = self.default_save_path
@@ -1243,34 +4477,27 @@ class OCRPDFApp(ttk.Window):
             print(f"Nevarēja saglabāt skenēšanas iestatījumus: {e}")
             return False
 
-
     def _flatten_file_system(self, node):
-        """Rekursīvi pārveido koka struktūru par sarakstu, lai to varētu serializēt."""
-        flat_list = []
-        if node["type"] == "file":
-            # Noņem 'parent' atsauci, jo tā ir ciklisks objekts un nevar tikt serializēta
-            temp_node = node.copy()
-            temp_node.pop("parent", None)
-            flat_list.append(temp_node)
-        elif node["type"] == "folder":
-            # Noņem 'parent' atsauci no mapes objekta
-            temp_node = node.copy()
-            temp_node.pop("parent", None)
-            temp_node["contents"] = [self._flatten_file_system(item) for item in node["contents"]]
-            flat_list.append(temp_node)
-        return flat_list[0] if len(flat_list) == 1 else flat_list  # Atgriež vienu objektu, ja sarakstā ir tikai viens
+        """Rekursīvi pārveido koka struktūru par serializējamu dict, noņemot ciklisko 'parent' atsauci."""
+        serializable_node = node.copy()
+        serializable_node.pop("parent", None)  # Noņem 'parent' atsauci
 
-    def _unflatten_file_system(self, flat_node, parent=None):
-        """Rekursīvi pārveido sarakstu atpakaļ par koka struktūru."""
-        if flat_node["type"] == "file":
-            node = flat_node.copy()
-            node["parent"] = parent
-            return node
-        elif flat_node["type"] == "folder":
-            node = flat_node.copy()
-            node["parent"] = parent
-            node["contents"] = [self._unflatten_file_system(item, node) for item in flat_node["contents"]]
-            return node
+        if serializable_node["type"] == "folder":
+            # Rekursīvi apstrādā saturu
+            serializable_node["contents"] = [self._flatten_file_system(item) for item in node["contents"]]
+
+        return serializable_node
+
+    def _unflatten_file_system(self, serializable_node, parent=None):
+        """Rekursīvi pārveido serializējamu dict atpakaļ par koka struktūru, atjaunojot 'parent' atsauces."""
+        node = serializable_node.copy()
+        node["parent"] = parent  # Atjauno 'parent' atsauci
+
+        if node["type"] == "folder":
+            # Rekursīvi apstrādā saturu un nodod pašreizējo mezglu kā vecāku
+            node["contents"] = [self._unflatten_file_system(item, node) for item in serializable_node["contents"]]
+
+        return node
 
     def detect_and_decode_barcodes(self, img):
         """Atpazīst un atšifrē QR kodus un svītrkodus attēlā."""
@@ -1292,29 +4519,122 @@ class OCRPDFApp(ttk.Window):
 
     def load_internal_file_system(self):
         """Ielādē iekšējo failu sistēmu no arhīva JSON faila."""
-        self.internal_file_system = {"type": "folder", "name": "Sakne", "contents": []}
+        # Sākumā inicializējam tukšu saknes mapi
+        self.internal_file_system = {"type": "folder", "name": "Sakne", "contents": [], "parent": None}
         self.current_folder = self.internal_file_system
 
         if os.path.exists(self.pdf_archive_file):
             try:
-                with open(self.pdf_archive_file, 'r') as f:
-                    flat_data = json.load(f)
-                if flat_data:
-                    # Pārliecināmies, ka ielādējam saknes mapi
-                    self.internal_file_system = self._unflatten_file_system(flat_data)
-                    self.current_folder = self.internal_file_system  # Sākumā vienmēr saknes mapē
+                with open(self.pdf_archive_file, 'r', encoding='utf-8') as f:  # Pievienots encoding
+                    loaded_data = json.load(f)
+                if loaded_data:
+                    # Ielādējam visu koka struktūru, sākot no saknes
+                    self.internal_file_system = self._unflatten_file_system(loaded_data)
+                    self.current_folder = self.internal_file_system  # Pēc ielādes vienmēr sākam no saknes
             except json.JSONDecodeError:
-                messagebox.showwarning("Arhīva kļūda", "Neizdevās ielādēt PDF arhīvu. Fails ir bojāts.")
+                messagebox.showwarning("Arhīva kļūda", "Neizdevās ielādēt PDF arhīvu. Fails ir bojāts vai tukšs.")
+                # Ja fails ir bojāts, atiestatām uz tukšu sistēmu
+                self.internal_file_system = {"type": "folder", "name": "Sakne", "contents": [], "parent": None}
+                self.current_folder = self.internal_file_system
             except Exception as e:
                 messagebox.showerror("Arhīva ielādes kļūda", f"Neizdevās ielādēt PDF arhīvu: {e}")
+                # Ja rodas cita kļūda, atiestatām uz tukšu sistēmu
+                self.internal_file_system = {"type": "folder", "name": "Sakne", "contents": [], "parent": None}
+                self.current_folder = self.internal_file_system
+
+        # Pēc ielādes sinhronizējam ar fizisko failu sistēmu
+        #self.sync_with_physical_folders()
+
+    def save_pdf_and_update_archive(self, pdf_filepath, file_node):
+        """
+        Saglabā PDF failu un atjaunina iekšējo arhīvu.
+        Pēc tam augšupielādē Google Drive un atjaunina Google Sheet, ja iespējots.
+        """
+        import os
+        from datetime import datetime
+
+        # Pārliecināmies, ka fails eksistē
+        if not os.path.exists(pdf_filepath):
+            messagebox.showerror("Kļūda", f"Fails nav atrasts: {pdf_filepath}")
+            return
+
+        # Pievienojam vai atjaunojam faila mezglu iekšējā arhīvā
+        if file_node not in self.current_folder["contents"]:
+            self.current_folder["contents"].append(file_node)
+
+        # Atjaunojam faila mezglu ar pamata informāciju
+        file_node["filepath"] = pdf_filepath
+        if "date" not in file_node or not file_node["date"]:
+            file_node["date"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        if "doc_id" not in file_node or not file_node["doc_id"]:
+            import uuid
+            file_node["doc_id"] = str(uuid.uuid4())[:8]  # Īss unikāls ID
+
+        # Saglabājam arhīvu uz diska
+        self.save_pdf_archive()
+
+        # Ja ir ieslēgta automātiskā augšupielāde un mērķis ir Google Drive
+        if self.auto_upload_enabled.get() and self.remote_storage_type.get() == "Google Drive":
+            google_drive_folder_id = self.google_drive_folder_id.get()  # Iegūstam mērķa mapes ID
+
+            # Augšupielādējam failu Google Drive
+            file_id, web_view_link = self.upload_file_to_google_drive(pdf_filepath, google_drive_folder_id)
+
+            if file_id and web_view_link:
+                # Atjaunojam faila mezglu ar Google Drive informāciju
+                file_node["google_drive_id"] = file_id
+                file_node["google_drive_link"] = web_view_link
+
+                # Saglabājam arhīvu ar jaunajiem datiem
+                self.save_pdf_archive()
+
+                # Aprēķinām iekšējā faila ceļu (mapju ceļu)
+                internal_folder_path = self._get_internal_folder_path_for_node(file_node)
+
+                # Sagatavojam datus Google Sheet atjaunināšanai
+                sheet_file_info = {
+                    "name": file_node.get("name", os.path.basename(pdf_filepath)),
+                    "doc_id": file_node.get("doc_id", ""),
+                    "filepath": pdf_filepath,
+                    "assigned_id": file_node.get("assigned_id", ""),  # Ja jums ir šāds lauks
+                    "date": file_node.get("date", datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+                    "internal_folder_path": internal_folder_path,
+                    "google_drive_id": file_id,
+                    "google_drive_link": web_view_link
+                }
+
+                # Atjaunojam Google Sheet ierakstu
+                self.update_google_sheet_entry(sheet_file_info)
+
+                print(f"Fails '{file_node.get('name')}' augšupielādēts un Google Sheet atjaunināts.")
+            else:
+                print("Google Drive augšupielāde neizdevās vai saite nav pieejama.")
+        else:
+            print("Automātiskā augšupielāde nav ieslēgta vai mērķis nav Google Drive.")
+
+        # Paziņojums lietotājam
+        messagebox.showinfo("Saglabāts", f"Fails '{file_node.get('name')}' veiksmīgi saglabāts un arhivēts.")
+
+    def _get_internal_folder_path_for_node(self, node):
+        """Palīgmetode, lai iegūtu iekšējās mapes ceļu dotajam mezglam."""
+        path_parts = []
+        current = node.get("parent", None)
+        while current and current != self.internal_file_system:
+            if current["type"] == "folder":
+                path_parts.insert(0, current["name"])
+            current = current.get("parent", None)
+        return "/".join(path_parts) if path_parts else "Sakne"
+
+
 
     def save_pdf_archive(self):
         """Saglabā PDF arhīva datus JSON failā."""
         try:
-            # Pārveido koka struktūru par serializējamu sarakstu
-            flat_data = self._flatten_file_system(self.internal_file_system)
-            with open(self.pdf_archive_file, 'w') as f:
-                json.dump(flat_data, f, indent=4)
+            # Pārveido koka struktūru par serializējamu dict
+            serializable_data = self._flatten_file_system(self.internal_file_system)
+            with open(self.pdf_archive_file, 'w', encoding='utf-8') as f:  # Pievienots encoding
+                json.dump(serializable_data, f, indent=4,
+                          ensure_ascii=False)  # ensure_ascii=False, lai atbalstītu latviešu burtus
         except Exception as e:
             messagebox.showerror("Arhīva saglabāšanas kļūda", f"Neizdevās saglabāt PDF arhīvu: {e}")
 
@@ -1360,6 +4680,81 @@ class OCRPDFApp(ttk.Window):
 
         except Exception as e:
             messagebox.showerror("Kļūda", f"Neizdevās pievienot paroli: {e}")
+
+    def on_item_double_click(self, event=None):  # Pievienots event parametrs, lai varētu izmantot kā bind funkciju
+        """
+        Apstrādā dubultklikšķi uz failu saraksta elementa.
+        """
+        selection = self.pdf_listbox.curselection()
+        if selection:
+            index = selection[0]
+            # Pārliecināmies, ka indekss ir derīgs pašreizējās mapes saturam
+            if index < len(self.current_folder["contents"]):  # <--- PĀRBAUDI ŠO!
+                selected_item = self.current_folder["contents"][index]  # <--- PĀRBAUDI ŠO!
+
+                # Izsaucam open_selected_item, kas jau apstrādā gan failus, gan mapes
+                self.open_selected_item(selected_item)
+
+    def navigate_to_folder(self, folder_name):
+        """
+        Navigē uz norādīto mapi pēc nosaukuma
+        """
+
+        def find_folder_by_name(folder_contents, target_name):
+            """Rekursīvi meklē mapi pēc nosaukuma"""
+            for item in folder_contents:
+                if item["type"] == "folder" and item["name"] == target_name:
+                    return item
+                elif item["type"] == "folder" and "contents" in item:
+                    # Rekursīvi meklē apakšmapēs
+                    result = find_folder_by_name(item["contents"], target_name)
+                    if result:
+                        return result
+            return None
+
+        # Meklē mapi sākot no saknes
+        target_folder = find_folder_by_name(self.internal_file_system["contents"], folder_name)
+
+        if target_folder:
+            self.current_folder = target_folder
+            self.update_pdf_list()
+            print(f"Navigēts uz mapi: {folder_name}")
+
+            # Atjaunina navigācijas ceļu
+            self.update_navigation_path()
+        else:
+            print(f"Mape '{folder_name}' nav atrasta")
+            messagebox.showwarning("Mape nav atrasta", f"Nevar atrast mapi: {folder_name}")
+
+    def navigate_to_folder_by_object(self, folder_object):
+        """
+        Navigē uz konkrēto mapes objektu (nevis meklē pēc nosaukuma)
+        """
+        if folder_object and folder_object.get("type") == "folder":
+            self.current_folder = folder_object
+            self.update_pdf_list()
+            print(f"Navigēts uz mapi: {folder_object.get('name', 'Nezināma mape')}")
+            self.update_navigation_path()
+        else:
+            print("Kļūda: Nederīgs mapes objekts")
+            messagebox.showerror("Kļūda", "Nevar navigēt uz norādīto mapi")
+
+    def update_navigation_path(self):
+        """Atjaunina navigācijas ceļa rādījumu"""
+        path_parts = []
+        current = self.current_folder
+
+        # Iet atpakaļ pa vecāku ķēdi, lai izveidotu ceļu
+        while current and current != self.internal_file_system:
+            path_parts.insert(0, current.get("name", "Nezināma mape"))
+            current = current.get("parent")
+
+        # Pievieno saknes mapi
+        path_parts.insert(0, "Sakne")
+
+        # Atjaunina ceļa rādījumu (ja tāds eksistē)
+        path_text = " > ".join(path_parts)
+        print(f"Pašreizējais ceļš: {path_text}")
 
     def remove_password_from_pdf(self, pdf_path):
         """Noņem paroli no PDF dokumenta"""
@@ -1439,6 +4834,239 @@ class OCRPDFApp(ttk.Window):
         except Exception as e:
             messagebox.showerror("Kļūda", f"Neizdevās mainīt paroli: {e}")
 
+    def split_pdf_to_pages(self, pdf_filepath):
+        """
+        Sadaļa PDF dokumentu atsevišķās lapās, katru saglabājot kā jaunu PDF
+        ar OCR tekstu, automātiski izveidotā apakšmapē blakus oriģinālajam failam.
+        """
+        if not os.path.exists(pdf_filepath):
+            messagebox.showerror("Kļūda", f"Fails nav atrasts: {pdf_filepath}")
+            return
+
+        try:
+            # Izveido jaunu mapi blakus oriģinālajam PDF failam
+            base_dir = os.path.dirname(pdf_filepath)
+            file_name_without_ext = os.path.splitext(os.path.basename(pdf_filepath))[0]
+            output_folder = os.path.join(base_dir, f"{file_name_without_ext}_pages")
+            os.makedirs(output_folder, exist_ok=True)
+
+            # Atrod oriģinālā PDF faila mezglu iekšējā failu sistēmā
+            original_pdf_node = None
+            original_pdf_node_index = -1
+            for i, item in enumerate(self.current_folder["contents"]):
+                if item["type"] == "file" and item["filepath"] == pdf_filepath:
+                    original_pdf_node = item
+                    original_pdf_node_index = i
+                    break
+
+            if not original_pdf_node:
+                messagebox.showwarning("Kļūda", "Oriģinālais PDF fails nav atrasts iekšējā failu sistēmā.")
+                return
+
+            # Izveido jaunu mapes mezglu iekšējā failu sistēmā
+            new_folder_name = f"{file_name_without_ext}_pages"
+            new_folder_node = {
+                "type": "folder",
+                "name": new_folder_name,
+                "contents": [],
+                "parent": self.current_folder  # Jaunā mape atrodas pašreizējā mapē
+            }
+
+            # Pievieno jauno mapi iekšējai failu sistēmai tajā pašā vietā, kur bija oriģinālais fails
+            self.current_folder["contents"].insert(original_pdf_node_index, new_folder_node)
+            # Noņem oriģinālo failu no pašreizējās mapes, jo tas tiks pārvietots uz jauno mapi
+            self.current_folder["contents"].pop(
+                original_pdf_node_index + 1)  # +1, jo jaunā mape tika ievietota pirms tam
+
+            print(f"Iekšējā failu sistēmā pievienota jauna mape: {new_folder_name}")
+
+            # Pārvieto oriģinālo PDF failu uz jaunizveidoto mapi
+            original_pdf_name = os.path.basename(pdf_filepath)
+            new_original_pdf_path = os.path.join(output_folder, original_pdf_name)
+
+            # Pārvieto fizisko failu
+            if os.path.abspath(pdf_filepath) != os.path.abspath(new_original_pdf_path):
+                os.rename(pdf_filepath, new_original_pdf_path)
+                print(f"Oriģinālais PDF '{original_pdf_name}' pārvietots uz: {output_folder}")
+
+            # Atjaunina oriģinālā faila mezglu, lai tas atrastos jaunajā mapē
+            original_pdf_node["filepath"] = new_original_pdf_path
+            original_pdf_node["parent"] = new_folder_node
+            new_folder_node["contents"].append(original_pdf_node)  # Pievieno oriģinālo failu jaunajai mapei
+
+            # Atveram PDF dokumentu ar pypdf un fitz
+            pdf_reader = pypdf.PdfReader(new_original_pdf_path)  # Lasām no pārvietotā faila
+            pdf_document = fitz.open(new_original_pdf_path)
+            total_pages = len(pdf_reader.pages)
+
+            if total_pages == 0:
+                messagebox.showwarning("Info", "PDF dokuments nesatur lapas.")
+                pdf_document.close()
+                return
+
+            # Parāda progresu
+            progress_window = Toplevel(self)
+            progress_window.title("Sadalīšana...")
+            progress_window.geometry("300x100")
+            progress_window.transient(self)
+            progress_window.grab_set()
+            progress_window.resizable(False, False)
+
+            progress_label = ttk.Label(progress_window, text="Sadalīšana: 0%")
+            progress_label.pack(pady=10)
+            progress_bar = ttk.Progressbar(progress_window, orient="horizontal", length=250, mode="determinate")
+            progress_bar.pack(pady=5)
+
+            # Centrē progresu logu
+            progress_window.update_idletasks()
+            x = self.winfo_x() + (self.winfo_width() // 2) - (progress_window.winfo_width() // 2)
+            y = self.winfo_y() + (self.winfo_height() // 2) - (progress_window.winfo_height() // 2)
+            progress_window.geometry(f"+{x}+{y}")
+
+            self.update_idletasks()
+
+            for i in range(total_pages):
+                fixed_page_number = i + 1
+                # Failu nosaukumi lapām ar _page_XXX sufiksu
+                page_file_name = f"{file_name_without_ext}_page_{fixed_page_number:03d}.pdf"
+                output_pdf_path = os.path.join(output_folder, page_file_name)
+
+                new_pdf_writer = pypdf.PdfWriter()
+                new_pdf_writer.add_page(pdf_reader.pages[i])
+
+                fitz_page = pdf_document.load_page(i)
+                pix = fitz_page.get_pixmap(dpi=self.dpi_var.get())
+                img_pil = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+
+                ocr_text = pytesseract.image_to_string(img_pil, lang=self.language_var.get(),
+                                                       config=f'--psm {self.psm_var.get()} --oem {self.oem_var.get()}')
+
+                if self.include_text_var.get() and ocr_text:
+                    try:
+                        temp_text_pdf_path = tempfile.mktemp(suffix=".pdf")
+                        a4_width, a4_height = A4
+                        c = canvas.Canvas(temp_text_pdf_path, pagesize=A4)
+                        c.setFont("Helvetica", self.fontsize_var.get())
+
+                        text_lines = ocr_text.split('\n')
+                        y_pos = a4_height - 50
+                        for line in text_lines:
+                            c.drawString(50, y_pos, line)
+                            y_pos -= self.fontsize_var.get() * 1.2
+                            if y_pos < 50:
+                                break
+                        c.save()
+
+                        overlay_pdf_reader = pypdf.PdfReader(temp_text_pdf_path)
+                        page_to_overlay = overlay_pdf_reader.pages[0]
+
+                        new_pdf_writer.pages[0].merge_page(page_to_overlay)
+                        os.remove(temp_text_pdf_path)
+                    except Exception as e:
+                        print(f"Kļūda pievienojot OCR tekstu lapai {fixed_page_number}: {e}")
+                        messagebox.showwarning("OCR teksta kļūda",
+                                               f"Neizdevās pievienot OCR tekstu lapai {fixed_page_number}: {e}")
+
+                with open(output_pdf_path, "wb") as output_pdf_file:
+                    new_pdf_writer.write(output_pdf_file)
+
+                # Pievieno sadalīto lapu jaunās mapes saturam
+                if new_folder_node:
+                    doc_id = str(uuid.uuid4())[:8]
+                    current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+                    page_file_node = {
+                        "type": "file",
+                        "name": page_file_name,  # Izmantojam jauno nosaukumu
+                        "filepath": output_pdf_path,
+                        "doc_id": doc_id,
+                        "date": current_time,
+                        "parent": new_folder_node,
+                        "original_page_number": fixed_page_number,
+                        "display_name": f"Lapa {fixed_page_number}"
+                    }
+                    new_folder_node["contents"].append(page_file_node)
+                    print(f"Pievienota lapa '{os.path.basename(output_pdf_path)}' iekšējai mapes struktūrai.")
+
+                progress_percent = int(((i + 1) / total_pages) * 100)
+                progress_label.config(text=f"Sadalīšana: {progress_percent}%")
+                progress_bar['value'] = progress_percent
+                progress_window.update_idletasks()
+
+            pdf_document.close()
+            progress_window.destroy()
+
+            messagebox.showinfo("Sadalīšana pabeigta",
+                                f"PDF dokuments veiksmīgi sadalīts {total_pages} lapās.\nSaglabāts mapē: {output_folder}\n\nOriģinālais fails pārvietots uz šo mapi.")
+
+            # Saglabā izmaiņas iekšējā failu sistēmā un atsvaidzina sarakstu
+            self.save_pdf_archive()
+            self.refresh_pdf_list()  # Atsvaidzina sarakstu, lai parādītu jauno struktūru
+
+        except Exception as e:
+            messagebox.showerror("Kļūda sadalīšanas laikā", f"Neizdevās sadalīt PDF dokumentu: {e}")
+    def init_scan_settings(self):
+        """
+        Inicializē skenēšanas iestatījumus ar noklusējuma vērtībām,
+        ja tās nav ielādētas no settings faila.
+        Šī metode tagad galvenokārt nodrošina, ka tk.Variable vērtības
+        tiek atjauninātas no self.settings, ja tās ir mainījušās.
+        """
+        # Pārliecināmies, ka tk.Variable mainīgie ir inicializēti ar vērtībām no self.settings
+        self.scan_camera_index.set(self.settings.get("scan_camera_index", 0))
+        self.scan_camera_width.set(self.settings.get("scan_camera_width", 1280))
+        self.scan_camera_height.set(self.settings.get("scan_camera_height", 120))
+        self.scan_min_contour_area.set(self.settings.get("scan_min_contour_area", 2500))
+        self.scan_stable_threshold.set(self.settings.get("scan_stable_threshold", 0.8))
+        self.scan_stability_tolerance.set(self.settings.get("scan_stability_tolerance", 0.01))
+        self.scan_aspect_ratio_min.set(self.settings.get("scan_aspect_ratio_min", 0.4))
+        self.scan_aspect_ratio_max.set(self.settings.get("scan_aspect_ratio_max", 2.3))
+        self.scan_gaussian_blur_kernel.set(self.settings.get("scan_gaussian_blur_kernel", 9))
+        self.scan_adaptive_thresh_block_size.set(self.settings.get("scan_adaptive_thresh_block_size", 11))
+        self.scan_adaptive_thresh_c.set(self.settings.get("scan_adaptive_thresh_c", 3))
+        self.scan_canny_thresh1.set(self.settings.get("scan_canny_thresh1", 610))
+        self.scan_canny_thresh2.set(self.settings.get("scan_canny_thresh2", 190))
+        self.scan_brightness.set(self.settings.get("scan_brightness", 0))
+        self.scan_contrast.set(self.settings.get("scan_contrast", 0))
+        self.scan_saturation.set(self.settings.get("scan_saturation", 0))
+        self.scan_gamma.set(self.settings.get("scan_gamma", 1.0))
+        self.scan_use_color_detection.set(self.settings.get("scan_use_color_detection", False))
+        self.scan_target_color.set(self.settings.get("scan_target_color", "#FFFFFF"))
+        self.scan_color_tolerance.set(self.settings.get("scan_color_tolerance", 30))
+        self.scan_morphology_enabled.set(self.settings.get("scan_morphology_enabled", False))
+        self.scan_morphology_kernel_size.set(self.settings.get("scan_morphology_kernel_size", 3))
+        self.scan_edge_dilation.set(self.settings.get("scan_edge_dilation", 2))
+
+        self.sync_scan_settings_from_vars()  # Sinhronizē self.scan_settings vārdnīcu ar tk.Variable vērtībām
+
+    def sync_scan_settings_from_vars(self):
+        """Sinhronizē self.scan_settings ar tk.IntVar/DoubleVar vērtībām."""
+        self.scan_settings["scan_camera_index"] = self.scan_camera_index.get()
+        self.scan_settings["scan_camera_width"] = self.scan_camera_width.get()
+        self.scan_settings["scan_camera_height"] = self.scan_camera_height.get()
+        self.scan_settings["scan_min_contour_area"] = self.scan_min_contour_area.get()
+        self.scan_settings["scan_stable_threshold"] = self.scan_stable_threshold.get()
+        self.scan_settings["scan_stability_tolerance"] = self.scan_stability_tolerance.get()
+        self.scan_settings["scan_aspect_ratio_min"] = self.scan_aspect_ratio_min.get()
+        self.scan_settings["scan_aspect_ratio_max"] = self.scan_aspect_ratio_max.get()
+        self.scan_settings["scan_gaussian_blur_kernel"] = self.scan_gaussian_blur_kernel.get()
+        self.scan_settings["scan_adaptive_thresh_block_size"] = self.scan_adaptive_thresh_block_size.get()
+        self.scan_settings["scan_adaptive_thresh_c"] = self.scan_adaptive_thresh_c.get()
+        self.scan_settings["scan_canny_thresh1"] = self.scan_canny_thresh1.get()
+        self.scan_settings["scan_canny_thresh2"] = self.scan_canny_thresh2.get()
+
+        # Attēlu apstrādes iestatījumi
+        self.scan_settings["scan_brightness"] = self.scan_brightness.get()
+        self.scan_settings["scan_contrast"] = self.scan_contrast.get()
+        self.scan_settings["scan_saturation"] = self.scan_saturation.get()
+        self.scan_settings["scan_gamma"] = self.scan_gamma.get()
+        self.scan_settings["scan_use_color_detection"] = self.scan_use_color_detection.get()
+        self.scan_settings["scan_target_color"] = self.scan_target_color.get()
+        self.scan_settings["scan_color_tolerance"] = self.scan_color_tolerance.get()
+        self.scan_settings["scan_morphology_enabled"] = self.scan_morphology_enabled.get()
+        self.scan_settings["scan_morphology_kernel_size"] = self.scan_morphology_kernel_size.get()
+        self.scan_settings["scan_edge_dilation"] = self.scan_edge_dilation.get()
+
     def create_widgets(self):
         """Izveido galvenās lietotnes logrīkus un cilnes."""
         self.notebook = ttk.Notebook(self)
@@ -1502,18 +5130,23 @@ class OCRPDFApp(ttk.Window):
         self.btn_open = ttk.Button(top_frame, text="Atvērt attēlus/PDF", command=self.open_files, bootstyle="primary")
         self.btn_open.pack(side=tk.LEFT, padx=2)
 
-
         # Pievienota poga kameras skenēšanai
         self.btn_scan_camera = ttk.Button(top_frame, text="Skenēt ar kameru", command=self.scan_document_with_camera,
                                           bootstyle="info", state=tk.NORMAL if OPENCV_AVAILABLE else tk.DISABLED)
         self.btn_scan_camera.pack(side=tk.LEFT, padx=2)
+
+        self.btn_document_detection = ttk.Button(top_frame, text="Atlasīt dokumentu no attēla",
+                                                 command=self.show_document_detection_menu,
+                                                 bootstyle="warning")
+
+        self.btn_document_detection.pack(side=tk.LEFT, padx=2)
 
         self.btn_settings = ttk.Button(top_frame, text="Vispārīgie Iestatījumi",
                                        command=self.show_settings)  # MAINĪTS TEKSTS
         self.btn_settings.pack(side=tk.LEFT, padx=2)
 
         self.btn_scan_settings = ttk.Button(top_frame, text="Skenēšanas Iestatījumi",
-                                            command=self.show_scan_settings)  # JAUNA POGA
+                                            command=self.show_scan_settingss)  # JAUNA POGA
         self.btn_scan_settings.pack(side=tk.LEFT, padx=2)
 
         self.btn_check_langs = ttk.Button(top_frame, text="Pārbaudīt valodas", command=self.check_ocr_languages)
@@ -1539,7 +5172,7 @@ class OCRPDFApp(ttk.Window):
         self.confidence_var = tk.IntVar(value=60)
         ttk.Spinbox(params_frame, from_=0, to=100, increment=5, textvariable=self.confidence_var, width=3).grid(row=0,
                                                                                                                 column=5,
-                                                                                                            padx=2)
+                                                                                                                padx=2)
 
         ttk.Label(params_frame, text="PSM:").grid(row=0, column=6)
         # self.psm_var = tk.IntVar(value=3) # Šī rinda vairs nav nepieciešama, jo definēta __init__
@@ -1598,16 +5231,14 @@ class OCRPDFApp(ttk.Window):
         file_list_scrollbar.pack(side=tk.RIGHT, fill="y")
         self.file_listbox.config(yscrollcommand=file_list_scrollbar.set)
 
-        self.file_listbox.bind("<Button-1>", self.file_list_drag_start)  # Kreisais klikšķis sāk vilkšanu
-        self.file_listbox.bind("<B1-Motion>", self.file_list_drag_motion)  # Vilkšanas kustība
-        self.file_listbox.bind("<ButtonRelease-1>", self.file_list_drag_drop)  # Nomešana
+        #self.file_listbox.bind("<Button-1>", self.file_list_drag_start)  # Kreisais klikšķis sāk vilkšanu
+        #self.file_listbox.bind("<B1-Motion>", self.file_list_drag_motion)  # Vilkšanas kustība
+        #self.file_listbox.bind("<ButtonRelease-1>", self.file_list_drag_drop)  # Nomešana
         self.file_listbox.bind("<Button-3>", self.show_file_context_menu)  # Labais klikšķis
         self.file_listbox.bind("<Button-1>", self.on_file_click)  # Pievienojam jaunu bind, lai apstrādātu vienu klikšķi
         self.file_listbox.bind("<<ListboxSelect>>",
                                lambda e: self.after(1, self.on_file_select_deferred))  # Aizkavēta atlase
-        # Inicializējam vilkšanas datus attēlu sarakstam
-        self.file_drag_data = {"item_index": None, "start_y": 0}
-
+        # Vilkšanas datus vairs nevajag, jo drag-and-drop ir atspējots.
 
         # JAUNS: OCR pogas un progresa josla failu saraksta rāmī
         ocr_controls_frame = ttk.Frame(file_list_container)
@@ -1617,12 +5248,14 @@ class OCRPDFApp(ttk.Window):
         self.progress.pack(fill="x", expand=True, padx=(0, 5))
 
         ocr_buttons_inner_frame = ttk.Frame(ocr_controls_frame)
-        ocr_buttons_inner_frame.pack(fill="x", pady=(5,0)) # Neliela atstarpe starp progress bar un pogām
+        ocr_buttons_inner_frame.pack(fill="x", pady=(5, 0))  # Neliela atstarpe starp progress bar un pogām
 
-        self.btn_start = ttk.Button(ocr_buttons_inner_frame, text="Sākt OCR", command=self.start_processing, bootstyle="success")
+        self.btn_start = ttk.Button(ocr_buttons_inner_frame, text="Sākt OCR", command=self.start_processing,
+                                    bootstyle="success")
         self.btn_start.pack(side=tk.LEFT, expand=True, padx=2)
 
-        self.btn_stop = ttk.Button(ocr_buttons_inner_frame, text="Apturēt", command=self.stop_processing_func, state=tk.DISABLED,
+        self.btn_stop = ttk.Button(ocr_buttons_inner_frame, text="Apturēt", command=self.stop_processing_func,
+                                   state=tk.DISABLED,
                                    bootstyle="danger")
         self.btn_stop.pack(side=tk.LEFT, expand=True, padx=2)
 
@@ -1728,7 +5361,15 @@ class OCRPDFApp(ttk.Window):
         ttk.Checkbutton(processing_buttons_frame, text="Binārizācija", variable=self.binarize_var,
                         command=lambda: self.apply_image_filters(None)).pack(anchor="w", pady=2)
 
-        ttk.Button(processing_buttons_frame, text="Apgriezt attēlu", command=self.crop_image).pack(anchor="w", pady=2)
+        self.btn_toggle_crop_mode = ttk.Button(processing_buttons_frame, text="Apgriezt attēlu (vilkt)",
+                                               command=self.toggle_cropping_mode)
+        # JAUNS: Poga QR koda rāmja attēlošanai un inicializēšanai
+        self.btn_toggle_qr_frame = ttk.Button(processing_buttons_frame, text="Rediģēt koda rāmi",
+                                              command=self.toggle_qr_frame_display)
+        self.btn_toggle_qr_frame.pack(anchor="w", pady=2)
+
+        self.btn_toggle_crop_mode.pack(anchor="w", pady=2)
+
         ttk.Button(processing_buttons_frame, text="Pagriezt par 90°", command=self.rotate_90_degrees).pack(anchor="w",
                                                                                                            pady=2)
         ttk.Button(processing_buttons_frame, text="Spoguļot (Horiz.)",
@@ -1773,6 +5414,47 @@ class OCRPDFApp(ttk.Window):
         ttk.Button(file_list_buttons_frame, text="Dzēst atlasīto", command=self.delete_selected_image,
                    bootstyle="danger").pack(fill="x")
 
+    def toggle_cropping_mode(self):
+        """Ieslēdz/izslēdz attēla apgriešanas režīmu uz kanvasa."""
+        if self.current_image_index == -1:
+            messagebox.showwarning("Nav attēla", "Lūdzu, vispirms atlasiet attēlu, ko apgriezt.")
+            return
+
+        self.cropping_mode = not self.cropping_mode
+        if self.cropping_mode:
+            self.btn_toggle_crop_mode.config(bootstyle="warning")
+            self.canvas.config(cursor="cross")
+            messagebox.showinfo("Apgriešanas režīms",
+                                "Apgriešanas režīms ieslēgts. Velciet ar peli, lai atlasītu apgriešanas apgabalu.")
+        else:
+            self.btn_toggle_crop_mode.config(bootstyle="default")
+            self.canvas.config(cursor="arrow")
+            if self.crop_rect_id:
+                self.canvas.delete(self.crop_rect_id)
+                self.crop_rect_id = None
+            messagebox.showinfo("Apgriešanas režīms", "Apgriešanas režīms izslēgts.")
+
+    def toggle_qr_frame_display(self):
+        """Ieslēdz/izslēdz QR koda/svītrkoda rāmja rediģēšanas režīmu."""
+        if self.current_image_index == -1:
+            messagebox.showwarning("Nav attēla", "Lūdzu, vispirms atlasiet attēlu, lai rediģētu QR rāmi.")
+            return
+
+        if hasattr(self, '_qr_edit_mode') and self._qr_edit_mode:
+            # Izslēdz rediģēšanas režīmu
+            self._qr_edit_mode = False
+            self.btn_toggle_qr_frame.config(bootstyle="default", text="Rediģēt QR pozīciju")
+            messagebox.showinfo("QR rāmis", "QR koda rediģēšanas režīms izslēgts.")
+        else:
+            # Ieslēdz rediģēšanas režīmu
+            self._qr_edit_mode = True
+            if not hasattr(self, 'qr_code_frame_coords') or self.qr_code_frame_coords is None:
+                self._set_default_qr_frame_coords()
+            self.btn_toggle_qr_frame.config(bootstyle="warning", text="Beigt QR rediģēšanu")
+            messagebox.showinfo("QR rāmis",
+                                "QR koda rediģēšanas režīms ieslēgts. Velciet rāmi, lai pārvietotu, vai velciet stūrus, lai mainītu izmēru.")
+
+        self.show_image_preview(self.images[self.current_image_index]["processed_img"])
 
     def create_file_management_widgets(self, parent_frame):
         """Izveido logrīkus failu pārvaldības cilnei."""
@@ -1795,192 +5477,612 @@ class OCRPDFApp(ttk.Window):
         # Meklēšana
         ttk.Label(filter_frame, text="Meklēt:").grid(row=0, column=0, sticky="w", padx=5, pady=2)
         self.search_var = tk.StringVar()
-        self.search_entry = ttk.Entry(filter_frame, textvariable=self.search_var, width=40)
+        self.search_entry = ttk.Entry(filter_frame, textvariable=self.search_var, width=200)
         self.search_entry.grid(row=0, column=1, sticky="ew", padx=5, pady=2)
         self.search_entry.bind("<KeyRelease>", self.filter_pdf_list)
 
         # Datuma filtrēšana
         ttk.Label(filter_frame, text="No datuma:").grid(row=1, column=0, sticky="w", padx=5, pady=2)
         self.start_date_var = tk.StringVar()
-        self.start_date_entry = ttk.Entry(filter_frame, textvariable=self.start_date_var, width=15)
+        self.start_date_entry = ttk.Entry(filter_frame, textvariable=self.start_date_var, width=400)
         self.start_date_entry.grid(row=1, column=1, sticky="w", padx=5, pady=2)
         ttk.Button(filter_frame, text="Kalendārs", command=self.open_start_date_calendar).grid(row=1, column=2,
                                                                                                sticky="w", padx=2)
 
         ttk.Label(filter_frame, text="Līdz datumam:").grid(row=2, column=0, sticky="w", padx=5, pady=2)
         self.end_date_var = tk.StringVar()
-        self.end_date_entry = ttk.Entry(filter_frame, textvariable=self.end_date_var, width=15)
+        self.end_date_entry = ttk.Entry(filter_frame, textvariable=self.end_date_var, width=400)
         self.end_date_entry.grid(row=2, column=1, sticky="w", padx=5, pady=2)
         ttk.Button(filter_frame, text="Kalendārs", command=self.open_end_date_calendar).grid(row=2, column=2,
                                                                                              sticky="w", padx=2)
 
-        ttk.Button(filter_frame, text="Filtrēt", command=self.filter_pdf_list).grid(row=3, column=1, sticky="ew",
-                                                                                    padx=5, pady=5)
-        ttk.Button(filter_frame, text="Notīrīt filtrus", command=self.clear_pdf_filters).grid(row=3, column=2,
-                                                                                              sticky="ew", padx=5,
-                                                                                              pady=5)
+        # Pogu rāmis, lai tās būtu mazākas un centrētas
+        button_row_frame = ttk.Frame(filter_frame)
+        button_row_frame.grid(row=3, column=0, columnspan=3, pady=5)  # Izvieto rāmi visā platumā
+        button_row_frame.columnconfigure(0, weight=1)  # Centra pogas
+        button_row_frame.columnconfigure(1, weight=1)  # Centra pogas
+        button_row_frame.columnconfigure(2, weight=1)  # Centra pogas
+
+        ttk.Button(button_row_frame, text="Filtrēt", command=self.filter_pdf_list, width=15).grid(row=0, column=0,
+                                                                                                  padx=5, sticky="e")
+        ttk.Button(button_row_frame, text="Notīrīt filtrus", command=self.clear_pdf_filters, width=15).grid(row=0,
+                                                                                                            column=2,
+                                                                                                            padx=5,
+                                                                                                            sticky="w")
 
         filter_frame.columnconfigure(1, weight=1)
 
-        # PDF arhīva saraksts un mapju navigācija
-        archive_frame = ttk.LabelFrame(inner_file_management_frame, text="Saglabātie PDF faili", padding=10)
-        archive_frame.pack(fill=BOTH, expand=True, padx=10, pady=10)  # Aizņem visu atlikušo vietu
+        # JAUNS: PanedWindow, lai sadalītu apgabalu trīs rūtīs
+        # Kreisā: PDF priekšskatījums
+        # Vidējā: Failu saraksts
+        # Labā: Darbību pogas
+        self.file_management_paned_window = ttk.PanedWindow(inner_file_management_frame, orient=tk.HORIZONTAL)
+        self.file_management_paned_window.pack(fill=BOTH, expand=True, padx=10, pady=10)
+
+        # --- 1. Rūts: PDF priekšskatījums ---
+        pdf_preview_container = ttk.Frame(self.file_management_paned_window)
+        self.file_management_paned_window.add(pdf_preview_container, weight=1)  # Svars, lai izstieptos
+
+        ttk.Label(pdf_preview_container, text="PDF priekšskatījums:").pack(fill="x", pady=(0, 5))
+        self.pdf_preview_canvas = tk.Canvas(pdf_preview_container, bg="gray", bd=2, relief="sunken")
+        self.pdf_preview_canvas.pack(fill="both", expand=True)
+
+        # Pievienojam peles notikumus priekšskatījuma kanvasam
+        self.pdf_preview_canvas.bind("<Configure>", self._on_pdf_preview_canvas_resize)
+        self.pdf_preview_canvas.bind("<MouseWheel>", self._on_pdf_preview_mouse_wheel)
+        self.pdf_preview_canvas.bind("<Button-4>", self._on_pdf_preview_mouse_wheel)  # MacOS
+        self.pdf_preview_canvas.bind("<Button-5>", self._on_pdf_preview_mouse_wheel)  # MacOS
+        self.pdf_preview_canvas.bind("<ButtonPress-1>", self._on_pdf_preview_pan_start)
+        self.pdf_preview_canvas.bind("<B1-Motion>", self._on_pdf_preview_pan_drag)
+        self.pdf_preview_canvas.bind("<ButtonRelease-1>", self._on_pdf_preview_pan_end)
+
+        # Navigācijas pogas priekšskatījumam
+        pdf_preview_nav_frame = ttk.Frame(pdf_preview_container)
+        pdf_preview_nav_frame.pack(fill="x", pady=(5, 0))
+
+        self.prev_page_button = ttk.Button(pdf_preview_nav_frame, text="← Iepriekšējā",
+                                           command=self._show_prev_pdf_page, state=tk.DISABLED)
+        self.prev_page_button.pack(side=tk.LEFT, expand=True, padx=2)
+
+        self.pdf_page_label = ttk.Label(pdf_preview_nav_frame, text="Lapa: 0/0")
+        self.pdf_page_label.pack(side=tk.LEFT, expand=True, padx=2)
+
+        self.next_page_button = ttk.Button(pdf_preview_nav_frame, text="Nākamā →", command=self._show_next_pdf_page,
+                                           state=tk.DISABLED)
+        self.next_page_button.pack(side=tk.LEFT, expand=True, padx=2)
+
+        # --- 2. Rūts: Failu saraksts un mapju navigācija ---
+        file_list_and_nav_container = ttk.Frame(self.file_management_paned_window)
+        self.file_management_paned_window.add(file_list_and_nav_container, weight=2)  # Lielāks svars, lai būtu platāks
+
+        # Šeit NENOLODZAM meklēšanas un filtrēšanas rāmja, jo tas jau ir augšpusē
+        # Tātad nekas nav jāievieto šeit
+
+        # PDF arhīva saraksts un mapju navigācija (tagad iekš file_list_and_nav_container)
+        archive_list_container = ttk.LabelFrame(file_list_and_nav_container, text="Saglabātie PDF faili", padding=10)
+        archive_list_container.pack(fill=BOTH, expand=True, padx=0, pady=5)  # Noņemam ārējās padx/pady
 
         # Mapju navigācijas rīkjosla
-        folder_nav_frame = ttk.Frame(archive_frame)
+        folder_nav_frame = ttk.Frame(archive_list_container)
         folder_nav_frame.pack(fill="x", pady=(0, 5))
 
         self.back_button = ttk.Button(folder_nav_frame, text="Atpakaļ", command=self.go_back_folder, state=DISABLED)
         self.back_button.pack(side=LEFT, padx=2)
 
+        self.refresh_page_button = ttk.Button(folder_nav_frame, text="Atsvaidzināt lapu", command=self.refresh_pdf_list)
+        self.refresh_page_button.pack(side=LEFT, padx=(5, 10))
+
         self.current_path_label = ttk.Label(folder_nav_frame, text="/")
-        self.current_path_label.pack(side=LEFT, padx=5)
+        self.current_path_label.pack(side=LEFT, padx=5, expand=True, fill=tk.X)
 
         # Ritjosla PDF sarakstam
-        pdf_list_frame_with_scrollbar = ttk.Frame(archive_frame)
+        pdf_list_frame_with_scrollbar = ttk.Frame(archive_list_container)
         pdf_list_frame_with_scrollbar.pack(side=LEFT, fill="both", expand=True)
 
-        self.pdf_listbox = tk.Listbox(pdf_list_frame_with_scrollbar, selectmode=tk.EXTENDED,
-                                      exportselection=False)  # Atļauj vairāku failu atlasi
+        # Izveidojam tk.Text logrīku failu sarakstam
+        self.pdf_listbox = tk.Text(pdf_list_frame_with_scrollbar, wrap="none", exportselection=False,
+                                   font=("TkDefaultFont", 10))  # Pielāgojiet fontu, ja nepieciešams
         self.pdf_listbox.pack(side=LEFT, fill="both", expand=True)
 
-        pdf_list_scrollbar = ttk.Scrollbar(pdf_list_frame_with_scrollbar, orient="vertical",
-                                           command=self.pdf_listbox.yview)
-        pdf_list_scrollbar.pack(side=RIGHT, fill="y")
-        self.pdf_listbox.config(yscrollcommand=pdf_list_scrollbar.set)
+        # Ritjoslas tk.Text logrīkam
+        pdf_list_scrollbar_y = ttk.Scrollbar(pdf_list_frame_with_scrollbar, orient="vertical",
+                                             command=self.pdf_listbox.yview)
+        pdf_list_scrollbar_y.pack(side=RIGHT, fill="y")
+        self.pdf_listbox.config(yscrollcommand=pdf_list_scrollbar_y.set)
 
-        self.pdf_listbox.bind("<<ListboxSelect>>", self.on_pdf_select)
-        self.pdf_listbox.bind("<Double-Button-1>", self.open_selected_item)  # Dubultklikšķis atver PDF vai mapi
-        self.pdf_listbox.bind("<Button-3>", self.show_pdf_context_menu)  # Labais klikšķis
+        pdf_list_scrollbar_x = ttk.Scrollbar(archive_list_container, orient="horizontal",
+                                             command=self.pdf_listbox.xview)
+        pdf_list_scrollbar_x.pack(side=BOTTOM, fill="x")  # Novietojam zem saraksta
+        self.pdf_listbox.config(xscrollcommand=pdf_list_scrollbar_x.set)
 
-        # Drag and Drop bindings
-        self.pdf_listbox.bind("<Button-1>", self.drag_start)
-        self.pdf_listbox.bind("<B1-Motion>", self.drag_motion)
-        self.pdf_listbox.bind("<ButtonRelease-1>", self.drag_drop)
-        self.drag_data = {"x": 0, "y": 0, "item": None, "index": None}
+        # Konfigurējam tagus iekrāsošanai
+        self.pdf_listbox.tag_configure("highlight", background="yellow", foreground="black")
+        self.pdf_listbox.tag_configure("normal", background="", foreground="")  # Noklusējuma stils
+        # JAUNS: Tags atlasītajai rindai
+        self.pdf_listbox.tag_configure("selected_line", background="#007bff",
+                                       foreground="white")  # Zils fons, balts teksts
 
-        # Pogas PDF arhīvam
-        pdf_buttons_frame = ttk.Frame(archive_frame)
-        pdf_buttons_frame.pack(side=RIGHT, fill="y", padx=10)
+        # Pielāgojam notikumu piesaistes tk.Text logrīkam
+        self.pdf_listbox.bind("<Double-Button-1>", self.on_text_double_click)  # Jauna funkcija dubultklikšķim
+        self.pdf_listbox.bind("<ButtonRelease-3>", self.on_text_right_click)
+        self.pdf_listbox.bind("<ButtonRelease-2>", self.on_text_right_click)
+        self.pdf_listbox.bind("<Button-1>", self.on_text_single_click)  # Pievienojam jaunu bind, lai apstrādātu vienu klikšķi
 
-        ttk.Button(pdf_buttons_frame, text="Atvērt", command=self.open_selected_item).pack(fill="x", pady=5)
-        ttk.Button(pdf_buttons_frame, text="Atvērt mapē (sistēmā)", command=self.open_pdf_location).pack(fill="x",
-                                                                                                         pady=5)
-        ttk.Button(pdf_buttons_frame, text="Dzēst", command=self.delete_selected_item,
-                   bootstyle="danger").pack(fill="x", pady=5)
-        ttk.Button(pdf_buttons_frame, text="Nosūtīt e-pastā", command=self.send_selected_pdfs_by_email,
-                   bootstyle="info").pack(fill="x", pady=5)
-        ttk.Button(pdf_buttons_frame, text="Izveidot mapi", command=self.create_new_folder_internal).pack(fill="x",
-                                                                                                          pady=5)
-        ttk.Button(pdf_buttons_frame, text="Pārvietot uz...", command=self.move_selected_items).pack(fill="x", pady=5)
-        ttk.Button(pdf_buttons_frame, text="Pārdēvēt", command=self.rename_selected_item).pack(fill="x", pady=5)
-        ttk.Button(pdf_buttons_frame, text="Saglabāt kā Word", command=self.save_as_word).pack(fill="x", pady=5)
+        # Drag and Drop bindings (ja vēlaties saglabāt, bet tk.Text to neatbalsta tieši kā Listbox)
+        # Šīs funkcijas (drag_start, drag_motion, drag_drop) būs jāpārraksta vai jāatspējo,
+        # jo tās ir paredzētas Listbox. Es tās atstāju komentētas, lai neradītu kļūdas.
+        # self.pdf_listbox.bind("<Button-1>", self.drag_start)
+        # self.pdf_listbox.bind("<B1-Motion>", self.drag_motion)
+        # self.pdf_listbox.bind("<ButtonRelease-1>", self.drag_drop)
+        # self.drag_data = {"x": 0, "y": 0, "item": None, "index": None}
 
+        # --- 3. Rūts: Darbību pogas ---
+        pdf_buttons_frame = ttk.Frame(self.file_management_paned_window)
+        self.file_management_paned_window.add(pdf_buttons_frame, weight=0)  # Mazs svars, lai būtu šaurāks
+
+        # Izveidojam rāmi pogu grupēšanai un izkārtojumam
+        button_grid_frame = ttk.Frame(pdf_buttons_frame, padding=5)
+        button_grid_frame.pack(fill="both", expand=True)
+
+        # Konfigurējam kolonnas, lai pogas izstieptos vienmērīgi
+        button_grid_frame.columnconfigure(0, weight=1)
+        button_grid_frame.columnconfigure(1, weight=1)
+
+        # Pogu izveide un izkārtojums, izmantojot grid
+        # Rinda 0
+        ttk.Button(button_grid_frame, text="📂 Atvērt", command=self.open_selected_item,
+                   bootstyle="primary").grid(row=0, column=0, sticky="ew", padx=2, pady=2)
+        ttk.Button(button_grid_frame, text="📁 Atvērt mapē", command=self.open_pdf_location,
+                   bootstyle="secondary").grid(row=0, column=1, sticky="ew", padx=2, pady=2)
+
+        # Rinda 1
+        ttk.Button(button_grid_frame, text="🗑️ Dzēst", command=self.delete_selected_item,
+                   bootstyle="danger").grid(row=1, column=0, sticky="ew", padx=2, pady=2)
+        ttk.Button(button_grid_frame, text="📧 Nosūtīt e-pastā", command=self.send_selected_pdfs_by_email,
+                   bootstyle="info").grid(row=1, column=1, sticky="ew", padx=2, pady=2)
+
+        # Rinda 2
+        ttk.Button(button_grid_frame, text="➕ Izveidot mapi", command=self.create_new_folder_internal,
+                   bootstyle="success").grid(row=2, column=0, sticky="ew", padx=2, pady=2)
+        ttk.Button(button_grid_frame, text="➡️ Pārvietot uz...", command=self.move_selected_items,
+                   bootstyle="warning").grid(row=2, column=1, sticky="ew", padx=2, pady=2)
+
+        # Rinda 3
+        ttk.Button(button_grid_frame, text="✏️ Pārdēvēt", command=self.rename_selected_item,
+                   bootstyle="light").grid(row=3, column=0, sticky="ew", padx=2, pady=2)
+        ttk.Button(button_grid_frame, text="📄 Saglabāt kā Word", command=self.save_as_word,
+                   bootstyle="dark").grid(row=3, column=1, sticky="ew", padx=2, pady=2)
+
+        # Papildu pogas (ja nepieciešams, var pievienot šeit)
+        # Piemēram, PDF šifrēšana/atšifrēšana
+        ttk.Button(button_grid_frame, text="🔒 Pievienot paroli",
+                   command=lambda: self.add_password_to_pdf(self._get_selected_pdf_filepath()),
+                   bootstyle="secondary").grid(row=4, column=0, sticky="ew", padx=2, pady=2)
+        ttk.Button(button_grid_frame, text="🔓 Noņemt paroli",
+                   command=lambda: self.remove_password_from_pdf(self._get_selected_pdf_filepath()),
+                   bootstyle="secondary").grid(row=4, column=1, sticky="ew", padx=2, pady=2)
+        ttk.Button(button_grid_frame, text="🔑 Mainīt paroli",
+                   command=lambda: self.change_password_of_pdf(self._get_selected_pdf_filepath()),
+                   bootstyle="secondary").grid(row=5, column=0, sticky="ew", padx=2, pady=2)
+        ttk.Button(button_grid_frame, text="✂️ Sadalīt PDF",
+                   command=lambda: self.split_pdf_to_pages(self._get_selected_pdf_filepath()),
+                   bootstyle="secondary").grid(row=5, column=1, sticky="ew", padx=2, pady=2)
         self.refresh_pdf_list()  # Tagad self.current_folder ir inicializēts
 
+    def _get_selected_pdf_filepath(self):
+        """Atgriež atlasītā PDF faila ceļu, ja tāds ir, pretējā gadījumā None."""
+        if hasattr(self, '_selected_line_index') and self._selected_line_index != -1:
+            line_number = self._selected_line_index
+            if 0 <= line_number < len(self._displayed_items):
+                selected_item = self._displayed_items[line_number]
+                if selected_item["type"] == "file" and selected_item["name"].lower().endswith(".pdf"):
+                    return selected_item['filepath']
+        messagebox.showwarning("Nav atlasīts", "Lūdzu, atlasiet PDF failu, lai veiktu šo darbību.")
+        return None
+
+    def on_text_single_click(self, event):
+        """Apstrādā vienu klikšķi uz tk.Text logrīka, lai atlasītu visu rindu un parādītu priekšskatījumu."""
+        # Iegūst klikšķa pozīciju
+        index = self.pdf_listbox.index(f"@{event.x},{event.y}")
+        line_number = int(index.split(".")[0]) - 1  # 0-bāzēts rindas numurs
+
+        # Noņem iepriekšējo atlasi no visām rindām
+        self.pdf_listbox.tag_remove("selected_line", "1.0", tk.END)
+        # Noņem noklusējuma "sel" tagu, ja tas ir aktīvs
+        self.pdf_listbox.tag_remove("sel", "1.0", tk.END)
+
+        # Pievieno "selected_line" tagu atlasītajai rindai
+        start_index = f"{line_number + 1}.0"
+        end_index = f"{line_number + 1}.end"
+        self.pdf_listbox.tag_add("selected_line", start_index, end_index)
+
+        # Saglabā atlasītās rindas indeksu, lai to varētu izmantot citās funkcijās
+        self._selected_line_index = line_number
+
+        # Izsauc priekšskatījuma funkciju
+        if 0 <= line_number < len(self._displayed_items):
+            selected_item = self._displayed_items[line_number]
+            if selected_item["type"] == "file" and selected_item["name"].lower().endswith(".pdf"):
+                filepath = selected_item['filepath']
+                if os.path.exists(filepath):
+                    self._load_pdf_for_preview(filepath)
+                else:
+                    messagebox.showwarning("Fails nav atrasts", "Atlasītais PDF fails nav atrasts diskā.")
+                    self._clear_pdf_preview()
+            else:
+                self._clear_pdf_preview()
+        else:
+            self._clear_pdf_preview()
+            self._selected_line_index = -1  # Atiestata, ja nekas nav atlasīts
+
+        # Lai novērstu noklusējuma teksta atlases uzvedību, atgriež "break"
+        return "break"
+
+    def on_text_right_click(self, event):
+        print("Labais klikšķis uztverts!")  # Debug izdruka
+
+        index = self.pdf_listbox.index(f"@{event.x},{event.y}")
+        line_number = int(index.split(".")[0]) - 1
+
+        self.pdf_listbox.tag_remove("selected_line", "1.0", tk.END)
+        self.pdf_listbox.tag_remove("sel", "1.0", tk.END)
+
+        start_index = f"{line_number + 1}.0"
+        end_index = f"{line_number + 1}.end"
+        self.pdf_listbox.tag_add("selected_line", start_index, end_index)
+
+        self._selected_line_index = line_number
+
+        # Parāda konteksta izvēlni ar ekrāna koordinātām
+        try:
+            self.show_pdf_context_menu(event)
+        except Exception as e:
+            print(f"Kļūda parādot konteksta izvēlni: {e}")
+
+        return "break"
+
     def create_additional_tools_widgets(self, parent_frame):
-        """Izveido logrīkus papildu rīku cilnei."""
+        """Izveido logrīkus papildu rīku cilnei ar uzlabotu vizuālo noformējumu."""
         main_frame = ttk.Frame(parent_frame, padding=10)
         main_frame.pack(fill=BOTH, expand=True)
 
-        # Ritjosla visam papildu rīku saturam
-        tools_canvas = tk.Canvas(main_frame, highlightthickness=0)
-        tools_canvas.pack(side=LEFT, fill="both", expand=True)
+        # Galvenais PanedWindow, lai sadalītu cilni trīs vertikālās rūtīs
+        main_paned_window = ttk.PanedWindow(main_frame, orient=tk.HORIZONTAL)
+        main_paned_window.pack(fill=BOTH, expand=True)
 
-        tools_scrollbar = ttk.Scrollbar(main_frame, orient="vertical", command=tools_canvas.yview)
-        tools_scrollbar.pack(side=RIGHT, fill="y")
+        # --- Kreisā rūts: Attēlu analīzes un papildu attēlu rīki ---
+        left_pane = ttk.Frame(main_paned_window)
+        main_paned_window.add(left_pane, weight=1)  # Piešķir vienādu svaru
 
-        tools_canvas.configure(yscrollcommand=tools_scrollbar.set)
-        tools_canvas.bind('<Configure>', lambda e: tools_canvas.configure(scrollregion=tools_canvas.bbox("all")))
-
-        # Iekšējais rāmis, kurā atradīsies visi rīki
-        inner_tools_frame = ttk.Frame(tools_canvas)
-        tools_canvas.create_window((0, 0), window=inner_tools_frame, anchor="nw")
+        # Ritjosla kreisajai rūtij
+        left_canvas = tk.Canvas(left_pane, highlightthickness=0)
+        left_canvas.pack(side=LEFT, fill="both", expand=True)
+        left_scrollbar = ttk.Scrollbar(left_pane, orient="vertical", command=left_canvas.yview)
+        left_scrollbar.pack(side=RIGHT, fill="y")
+        left_canvas.configure(yscrollcommand=left_scrollbar.set)
+        left_canvas.bind('<Configure>', lambda e: left_canvas.configure(scrollregion=left_canvas.bbox("all")))
+        inner_left_frame = ttk.Frame(left_canvas)
+        left_canvas.create_window((0, 0), window=inner_left_frame, anchor="nw")
 
         # Attēlu analīzes rīki
-        image_analysis_frame = ttk.LabelFrame(inner_tools_frame, text="Attēlu analīze", padding=10)
+        image_analysis_frame = ttk.LabelFrame(inner_left_frame, text="Attēlu analīze", padding=10)
         image_analysis_frame.pack(fill=X, padx=5, pady=5)
-
-        ttk.Button(image_analysis_frame, text="Rādīt histogrammu", command=self.show_image_histogram).pack(fill=X,
-                                                                                                           pady=2)
-        ttk.Button(image_analysis_frame, text="Rādīt metadatus", command=self.show_image_metadata).pack(fill=X, pady=2)
-        ttk.Button(image_analysis_frame, text="Rādīt krāsu paleti", command=self.show_color_palette).pack(fill=X,
-                                                                                                          pady=2)
-        ttk.Button(image_analysis_frame, text="Attēla salīdzināšana", command=self.compare_images).pack(fill=X, pady=2)
-        ttk.Button(image_analysis_frame, text="Attēla kvalitātes novērtēšana",
-                   command=self.evaluate_image_quality).pack(fill=X, pady=2)
-        ttk.Button(image_analysis_frame, text="Teksta izvilkšana no apgabala",
-                   command=self.extract_text_from_region).pack(fill=X, pady=2)
-
-        # QR koda ģenerators
-        qr_generator_frame = ttk.LabelFrame(inner_tools_frame, text="QR koda ģenerators", padding=10)
-        qr_generator_frame.pack(fill=X, padx=5, pady=5)
-
-        ttk.Label(qr_generator_frame, text="Teksts QR kodam:").grid(row=0, column=0, sticky=W, pady=2)
-        self.qr_text_var = tk.StringVar()
-        ttk.Entry(qr_generator_frame, textvariable=self.qr_text_var, width=50).grid(row=0, column=1, sticky=EW, padx=5,
-                                                                                    pady=2)
-
-        ttk.Button(qr_generator_frame, text="Ģenerēt QR kodu", command=self.generate_qr_code).grid(row=1, column=0,
-                                                                                                   columnspan=2, pady=5)
-
-        self.qr_canvas = tk.Canvas(qr_generator_frame, width=200, height=200, bg="white")
-        self.qr_canvas.grid(row=2, column=0, columnspan=2, pady=5)
-
-        qr_generator_frame.columnconfigure(1, weight=1)
+        self._create_button_grid(image_analysis_frame, [
+            ("Histogramma", self.show_image_histogram, "chart-bar-fill"),
+            ("Metadati", self.show_image_metadata, "info-circle-fill"),
+            ("Krāsu palete", self.show_color_palette, "palette-fill"),
+            ("Attēla salīdzināšana", self.compare_images, "arrows-left-right"),
+            ("Kvalitātes novērtēšana", self.evaluate_image_quality, "star-fill"),
+            ("Teksta izvilkšana no apgabala", self.extract_text_from_region, "crop")
+        ])
 
         # Papildu attēlu apstrādes rīki
-        advanced_image_tools_frame = ttk.LabelFrame(inner_tools_frame, text="Papildu attēlu rīki", padding=10)
+        advanced_image_tools_frame = ttk.LabelFrame(inner_left_frame, text="Papildu attēlu rīki", padding=10)
         advanced_image_tools_frame.pack(fill=X, padx=5, pady=5)
+        self._create_button_grid(advanced_image_tools_frame, [
+            ("Krāsu konvertēšana", self.convert_color_space, "paint-bucket-fill"),
+            ("Ūdenszīmes pievienošana", self.add_watermark, "water"),
+            ("Attēla mozaīka", self.create_image_mosaic, "grid-fill"),
+            ("Attēla salikšana (stitch)", self.stitch_images, "puzzle-fill"),
+            ("Attēla atjaunošana (inpainting)", self.image_inpainting, "magic"),
+            ("Attēla stilizācija", self.stylize_image, "brush-fill"),
+            ("Ģeometriskās transformācijas", self.geometric_transformations, "bounding-box"),
+            ("Konvertēt uz pelēktoņiem", self.convert_to_grayscale, "image-fill"),
+            ("Pielietot sliekšņošanu", self.apply_thresholding, "brightness-high-fill"),
+            ("Pielietot Gausa izplūšanu", self.apply_gaussian_blur, "blur"),
+            ("Pielietot mediānas filtru", self.apply_median_filter, "filter-circle-fill"),
+            ("Uzlabot asumu", self.sharpen_image, "plus-circle-fill"),
+            ("Pagriezt par leņķi", self.rotate_image_by_angle, "arrow-clockwise"),
+            ("Pievienot teksta pārklājumu", self.add_text_overlay, "text-paragraph"),
+            ("Zīmēt taisnstūri", self.draw_rectangle_on_image, "square-fill"),
+            ("Zīmēt apli", self.draw_circle_on_image, "circle-fill"),
+            ("Izvilkt krāsu kanālus", self.extract_color_channels, "layers-fill"),
+            ("Apvienot krāsu kanālus", self.merge_color_channels, "stack-fill"),
+            ("Pielietot sēpijas filtru", self.apply_sepia_filter, "camera-fill"),
+            ("Pielietot vinjetes efektu", self.apply_vignette_effect, "circle-half"),
+            ("Pikselizēt attēlu", self.pixelate_image, "grid-3x3-gap-fill"),
+            ("Noteikt sejas", self.detect_faces, "person-bounding-box")
+        ])
 
-        ttk.Button(advanced_image_tools_frame, text="Krāsu konvertēšana", command=self.convert_color_space).pack(fill=X,
-                                                                                                                 pady=2)
-        ttk.Button(advanced_image_tools_frame, text="Ūdenszīmes pievienošana", command=self.add_watermark).pack(fill=X,
-                                                                                                                pady=2)
-        ttk.Button(advanced_image_tools_frame, text="Attēla mozaīka", command=self.create_image_mosaic).pack(fill=X,
-                                                                                                             pady=2)
-        ttk.Button(advanced_image_tools_frame, text="Attēla salikšana (stitch)", command=self.stitch_images).pack(
-            fill=X, pady=2)
-        ttk.Button(advanced_image_tools_frame, text="Attēla atjaunošana (inpainting)",
-                   command=self.image_inpainting).pack(fill=X, pady=2)
-        ttk.Button(advanced_image_tools_frame, text="Attēla stilizācija", command=self.stylize_image).pack(fill=X,
-                                                                                                           pady=2)
-        ttk.Button(advanced_image_tools_frame, text="Attēla ģeometriskās transformācijas",
-                   command=self.geometric_transformations).pack(fill=X, pady=2)
+        # --- Vidējā rūts: QR koda ģenerators ---
+        middle_pane = ttk.Frame(main_paned_window)
+        main_paned_window.add(middle_pane, weight=1)
 
-        # Jaunās funkcijas
-        ttk.Button(advanced_image_tools_frame, text="Konvertēt uz pelēktoņiem", command=self.convert_to_grayscale).pack(
-            fill=X, pady=2)
-        ttk.Button(advanced_image_tools_frame, text="Pielietot sliekšņošanu", command=self.apply_thresholding).pack(
-            fill=X, pady=2)
-        ttk.Button(advanced_image_tools_frame, text="Pielietot Gausa izplūšanu", command=self.apply_gaussian_blur).pack(
-            fill=X, pady=2)
-        ttk.Button(advanced_image_tools_frame, text="Pielietot mediānas filtru", command=self.apply_median_filter).pack(
-            fill=X, pady=2)
-        ttk.Button(advanced_image_tools_frame, text="Uzlabot asumu", command=self.sharpen_image).pack(fill=X, pady=2)
-        ttk.Button(advanced_image_tools_frame, text="Pagriezt par leņķi", command=self.rotate_image_by_angle).pack(
-            fill=X, pady=2)
-        ttk.Button(advanced_image_tools_frame, text="Pievienot teksta pārklājumu", command=self.add_text_overlay).pack(
-            fill=X, pady=2)
-        ttk.Button(advanced_image_tools_frame, text="Zīmēt taisnstūri", command=self.draw_rectangle_on_image).pack(
-            fill=X, pady=2)
-        ttk.Button(advanced_image_tools_frame, text="Zīmēt apli", command=self.draw_circle_on_image).pack(fill=X,
-                                                                                                          pady=2)
-        ttk.Button(advanced_image_tools_frame, text="Izvilkt krāsu kanālus", command=self.extract_color_channels).pack(
-            fill=X, pady=2)
-        ttk.Button(advanced_image_tools_frame, text="Apvienot krāsu kanālus", command=self.merge_color_channels).pack(
-            fill=X, pady=2)
-        ttk.Button(advanced_image_tools_frame, text="Pielietot sēpijas filtru", command=self.apply_sepia_filter).pack(
-            fill=X, pady=2)
-        ttk.Button(advanced_image_tools_frame, text="Pielietot vinjetes efektu",
-                   command=self.apply_vignette_effect).pack(fill=X, pady=2)
-        ttk.Button(advanced_image_tools_frame, text="Pikselizēt attēlu", command=self.pixelate_image).pack(fill=X,
-                                                                                                           pady=2)
-        ttk.Button(advanced_image_tools_frame, text="Noteikt sejas", command=self.detect_faces).pack(fill=X, pady=2)
+        qr_generator_frame = ttk.LabelFrame(middle_pane, text="QR koda ģenerators", padding=10)
+        qr_generator_frame.pack(fill=BOTH, expand=True, padx=5, pady=5)
+
+        ttk.Label(qr_generator_frame, text="Teksts QR kodam:").pack(pady=5)
+        self.qr_text_var = tk.StringVar()
+        ttk.Entry(qr_generator_frame, textvariable=self.qr_text_var, width=40).pack(fill=X, padx=5, pady=2)
+
+        ttk.Button(qr_generator_frame, text="Ģenerēt QR kodu", command=self.generate_qr_code,
+                   bootstyle="success", image=self._get_icon("qr-code-scan"), compound=tk.LEFT).pack(pady=10)
+
+        # QR koda priekšskatījums
+        self.qr_canvas = tk.Canvas(qr_generator_frame, bg="white", bd=2, relief="sunken")
+        self.qr_canvas.pack(fill=BOTH, expand=True, padx=5, pady=5)
+
+        # --- Labā rūts: PDF priekšskatījums ---
+        right_pane = ttk.Frame(main_paned_window)
+        main_paned_window.add(right_pane, weight=1)
+
+        pdf_preview_container = ttk.LabelFrame(right_pane, text="PDF priekšskatījums", padding=10)
+        pdf_preview_container.pack(fill=BOTH, expand=True, padx=5, pady=5)
+
+        # Šī poga vairs netiek izmantota tiešai faila ielādei, jo priekšskatījums tiks sinhronizēts
+        # ar "Attēlu apstrāde" cilnes atlasi.
+        # Ja vēlaties, varat to noņemt vai mainīt tās funkcionalitāti.
+        # ttk.Button(pdf_preview_container, text="Atjaunināt PDF priekšskatījumu",
+        #            command=self._update_additional_tools_pdf_preview,
+        #            bootstyle="primary", image=self._get_icon("file-earmark-pdf-fill"), compound=tk.LEFT).pack(pady=5)
+        self.additional_tools_pdf_preview_canvas = tk.Canvas(pdf_preview_container, bg="gray", bd=2, relief="sunken")
+        self.additional_tools_pdf_preview_canvas.pack(fill="both", expand=True, pady=5)
+
+        # Pievienojam peles notikumus priekšskatījuma kanvasam
+        self.additional_tools_pdf_preview_canvas.bind("<Configure>",
+                                                      self._on_additional_tools_pdf_preview_canvas_resize)
+        self.additional_tools_pdf_preview_canvas.bind("<MouseWheel>", self._on_additional_tools_pdf_preview_mouse_wheel)
+        self.additional_tools_pdf_preview_canvas.bind("<Button-4>", self._on_additional_tools_pdf_preview_mouse_wheel)
+        self.additional_tools_pdf_preview_canvas.bind("<Button-5>", self._on_additional_tools_pdf_preview_mouse_wheel)
+        self.additional_tools_pdf_preview_canvas.bind("<ButtonPress-1>",
+                                                      self._on_additional_tools_pdf_preview_pan_start)
+        self.additional_tools_pdf_preview_canvas.bind("<B1-Motion>", self._on_additional_tools_pdf_preview_pan_drag)
+        self.additional_tools_pdf_preview_canvas.bind("<ButtonRelease-1>",
+                                                      self._on_additional_tools_pdf_preview_pan_end)
+
+        # Navigācijas pogas priekšskatījumam
+        pdf_preview_nav_frame = ttk.Frame(pdf_preview_container)
+        pdf_preview_nav_frame.pack(fill="x", pady=(5, 0))
+
+        self.additional_tools_prev_page_button = ttk.Button(pdf_preview_nav_frame, text="← Iepriekšējā",
+                                                            command=self._show_prev_additional_tools_pdf_page,
+                                                            state=tk.DISABLED,
+                                                            image=self._get_icon("arrow-left-circle-fill"),
+                                                            compound=tk.LEFT)
+        self.additional_tools_prev_page_button.pack(side=tk.LEFT, expand=True, padx=2)
+
+        self.additional_tools_pdf_page_label = ttk.Label(pdf_preview_nav_frame, text="Lapa: 0/0")
+        self.additional_tools_pdf_page_label.pack(side=tk.LEFT, expand=True, padx=2)
+
+        self.additional_tools_next_page_button = ttk.Button(pdf_preview_nav_frame, text="Nākamā →",
+                                                            command=self._show_next_additional_tools_pdf_page,
+                                                            state=tk.DISABLED,
+                                                            image=self._get_icon("arrow-right-circle-fill"),
+                                                            compound=tk.RIGHT)
+        self.additional_tools_next_page_button.pack(side=tk.LEFT, expand=True, padx=2)
+
+
+
+    def _update_additional_tools_pdf_preview(self):
+        """
+        Atjaunina PDF priekšskatījumu "Papildu rīki" cilnē, pamatojoties uz
+        pašreizējo atlasīto failu no self.images saraksta.
+        """
+        # Aizver iepriekšējo dokumentu, ja tāds ir
+        if self.additional_tools_current_pdf_document:
+            self.additional_tools_current_pdf_document.close()
+            self.additional_tools_current_pdf_document = None
+
+        # Notīra kanvasu un atiestata navigācijas pogas
+        self._clear_additional_tools_pdf_preview()
+
+        if self.current_image_index == -1 or not self.images:
+            self.additional_tools_pdf_preview_canvas.create_text(
+                self.additional_tools_pdf_preview_canvas.winfo_width() / 2,
+                self.additional_tools_pdf_preview_canvas.winfo_height() / 2,
+                text="Nav atlasīts attēls vai PDF priekšskatījumam.",
+                fill="white", font=("Helvetica", 12), justify="center"
+            )
+            return
+
+        selected_item = self.images[self.current_image_index]
+        filepath = selected_item.get("filepath")
+
+        if not filepath or not os.path.exists(filepath):
+            self.additional_tools_pdf_preview_canvas.create_text(
+                self.additional_tools_pdf_preview_canvas.winfo_width() / 2,
+                self.additional_tools_pdf_preview_canvas.winfo_height() / 2,
+                text="Atlasītais fails nav atrasts vai nav derīgs.",
+                fill="red", font=("Helvetica", 12), justify="center"
+            )
+            return
+
+        # Pārbauda, vai fails ir PDF
+        if filepath.lower().endswith(".pdf"):
+            self.additional_tools_pdf_preview_canvas.create_text(
+                self.additional_tools_pdf_preview_canvas.winfo_width() / 2,
+                self.additional_tools_pdf_preview_canvas.winfo_height() / 2,
+                text="Ielādē PDF...", fill="white", font=("Helvetica", 14)
+            )
+            if self.additional_tools_pdf_page_label:
+                self.additional_tools_pdf_page_label.config(text="Ielādē...")
+            self.update_idletasks()
+
+            try:
+                self.additional_tools_current_pdf_document = fitz.open(filepath)
+                self.additional_tools_current_pdf_page_count = self.additional_tools_current_pdf_document.page_count
+                self.additional_tools_current_pdf_page_index = 0  # Sākam ar pirmo lapu
+                self.additional_tools_pdf_preview_zoom_factor = 1.0  # Atiestatām tālummaiņu
+                self.additional_tools_pdf_preview_pan_x = 0  # Atiestatām pārvietošanu
+                self.additional_tools_pdf_preview_pan_y = 0
+
+                self._display_pdf_page_on_additional_tools_canvas()
+
+            except Exception as e:
+                messagebox.showerror("PDF ielādes kļūda (Papildu rīki)", f"Nevarēja ielādēt PDF priekšskatījumam:\n{e}")
+                self.additional_tools_current_pdf_document = None
+                self.additional_tools_current_pdf_page_count = 0
+                self.additional_tools_current_pdf_page_index = 0
+                self._clear_additional_tools_pdf_preview()
+                self.additional_tools_pdf_preview_canvas.create_text(
+                    self.additional_tools_pdf_preview_canvas.winfo_width() / 2,
+                    self.additional_tools_pdf_preview_canvas.winfo_height() / 2,
+                    text=f"Nevarēja ielādēt PDF:\n{e}", fill="red", font=("Helvetica", 12),
+                    justify="center"
+                )
+        else:
+            # Ja atlasītais fails nav PDF, parādām attēlu
+            try:
+                img_pil = selected_item.get("processed_img")
+                if img_pil:
+                    # Pielāgo attēlu kanvasa izmēram
+                    canvas_width = self.additional_tools_pdf_preview_canvas.winfo_width()
+                    canvas_height = self.additional_tools_pdf_preview_canvas.winfo_height()
+
+                    if canvas_width <= 1 or canvas_height <= 1:
+                        # Kanvass vēl nav gatavs, mēģinām vēlreiz pēc īsa laika
+                        self.after(50, self._update_additional_tools_pdf_preview)
+                        return
+
+                    display_img = img_pil.copy()
+                    display_img.thumbnail((canvas_width, canvas_height), Image.Resampling.LANCZOS)
+
+                    self.additional_tools_pdf_preview_photo = ImageTk.PhotoImage(display_img)
+                    self.additional_tools_pdf_preview_canvas.delete("all")
+                    self.additional_tools_pdf_preview_canvas.create_image(
+                        canvas_width // 2, canvas_height // 2,
+                        image=self.additional_tools_pdf_preview_photo, anchor="center"
+                    )
+                    if self.additional_tools_pdf_page_label:
+                        self.additional_tools_pdf_page_label.config(text="Attēls")
+                    if self.additional_tools_prev_page_button:
+                        self.additional_tools_prev_page_button.config(state=tk.DISABLED)
+                    if self.additional_tools_next_page_button:
+                        self.additional_tools_next_page_button.config(state=tk.DISABLED)
+                else:
+                    self.additional_tools_pdf_preview_canvas.create_text(
+                        self.additional_tools_pdf_preview_canvas.winfo_width() / 2,
+                        self.additional_tools_pdf_preview_canvas.winfo_height() / 2,
+                        text="Nav attēla datu priekšskatījumam.",
+                        fill="red", font=("Helvetica", 12), justify="center"
+                    )
+            except Exception as e:
+                self.additional_tools_pdf_preview_canvas.create_text(
+                    self.additional_tools_pdf_preview_canvas.winfo_width() / 2,
+                    self.additional_tools_pdf_preview_canvas.winfo_height() / 2,
+                    text=f"Kļūda attēlojot attēlu:\n{e}", fill="red", font=("Helvetica", 12),
+                    justify="center"
+                )
+
+    def _get_icon(self, icon_name, size=16):
+        """
+        Ielādē ikonu no tkfontawesome, ttkbootstrap iebūvētajām ikonām vai no faila.
+        Atgriež PhotoImage objektu.
+        """
+        # 1. Mēģina ielādēt ikonu no tkfontawesome
+        try:
+            # Piezīme: Font Awesome ikonu nosaukumi var atšķirties no Bootstrap ikonu nosaukumiem.
+            # Jums būs jāatrod atbilstošie Font Awesome nosaukumi.
+            # Piemēram, 'chart-bar-fill' varētu būt 'chart-bar' Font Awesome.
+            # Šeit ir daži piemēri, kā varētu mapēt:
+            fa_icon_map = {
+                "chart-bar-fill": "chart-bar",
+                "info-circle-fill": "info-circle",
+                "palette-fill": "palette",  # Varbūt "paint-brush" vai "fill-drip"
+                "arrows-left-right": "arrows-alt-h",  # Vai "exchange-alt"
+                "star-fill": "star",
+                "crop": "crop",
+                "paint-bucket-fill": "fill-drip",  # Vai "paint-brush"
+                "water": "water",
+                "grid-fill": "th-large",  # Vai "grip-horizontal"
+                "puzzle-fill": "puzzle-piece",
+                "magic": "magic",
+                "brush-fill": "brush",
+                "bounding-box": "box",  # Vai "vector-square"
+                "image-fill": "image",
+                "brightness-high-fill": "sun",  # Vai "lightbulb"
+                "blur": "smog",  # Vai "cloud"
+                "filter-circle-fill": "filter",
+                "plus-circle-fill": "plus-circle",
+                "arrow-clockwise": "sync-alt",  # Vai "redo-alt"
+                "text-paragraph": "paragraph",
+                "square-fill": "square",
+                "circle-fill": "circle",
+                "layers-fill": "layer-group",
+                "stack-fill": "stack-overflow",  # Vai "layer-group"
+                "camera-fill": "camera",
+                "circle-half": "adjust",  # Vai "circle-notch"
+                "grid-3x3-gap-fill": "grip-horizontal",  # Vai "th"
+                "person-bounding-box": "user",  # Vai "user-alt"
+                "qr-code-scan": "qrcode",
+                "arrow-left-circle-fill": "arrow-circle-left",
+                "arrow-right-circle-fill": "arrow-circle-right",
+                # Pievienojiet citus mapējumus šeit
+            }
+
+            fa_icon_name = fa_icon_map.get(icon_name,
+                                           icon_name)  # Mēģina atrast mapējumu, ja nav, izmanto oriģinālo nosaukumu
+
+            # tkfontawesome izmanto 'fa' prefiksu, ja ikona nav tieši atrasta
+            # Pārbaudiet Font Awesome dokumentāciju par precīziem nosaukumiem
+            return faw.icons.get(fa_icon_name, size=size)
+        except Exception as e:
+            # print(f"Nevarēja ielādēt ikonu '{icon_name}' no tkfontawesome: {e}") # Debugging
+            pass  # Turpina meklēt citos avotos
+
+        # 2. Mēģina ielādēt ikonu no ttkbootstrap iebūvētajām ikonām
+        try:
+            return ttk.PhotoImage(name=icon_name, size=size)
+        except Exception as e:
+            # print(f"Nevarēja ielādēt ikonu '{icon_name}' no ttkbootstrap: {e}") # Debugging
+            pass  # Turpina meklēt failā
+
+        # 3. Ja neizdodas, mēģina ielādēt no faila (pieņemot, ka ikonas ir 'icons' mapē)
+        icon_path = resource_path(os.path.join("icons", f"{icon_name}.png"))
+        if os.path.exists(icon_path):
+            try:
+                img = Image.open(icon_path)
+                img = img.resize((size, size), Image.LANCZOS)
+                return ImageTk.PhotoImage(img)
+            except Exception as e:
+                print(f"Kļūda ielādējot ikonu no faila '{icon_path}': {e}")
+        else:
+            print(f"Ikonas '{icon_name}' nav atrasta ne tkfontawesome, ne ttkbootstrap, ne failā.")
+        return None  # Atgriež None, ja ikonu nevar ielādēt
+
+    def _create_button_grid(self, parent_frame, buttons_data, cols=2):
+        """
+        Izveido pogu režģi dotajā rāmī.
+        buttons_data: saraksts ar (teksts, komanda, ikonas_nosaukums) tuple.
+        cols: kolonnu skaits režģī.
+        """
+        button_frame = ttk.Frame(parent_frame)
+        button_frame.pack(fill=X, pady=5)
+        for i in range(cols):
+            button_frame.columnconfigure(i, weight=1)
+
+        for idx, (text, command, icon_name) in enumerate(buttons_data):
+            row = idx // cols
+            col = idx % cols
+            icon = self._get_icon(icon_name)
+            btn = ttk.Button(button_frame, text=text, command=command, bootstyle="secondary")
+            if icon:
+                btn.config(image=icon, compound=tk.LEFT)
+            btn.grid(row=row, column=col, sticky="ew", padx=2, pady=2)
 
     def create_automation_widgets(self, parent_frame):
-        """Izveido logrīkus automatizācijas cilnei."""
-        main_frame = ttk.Frame(parent_frame, padding=10)
+        """Izveido logrīkus automatizācijas cilnei ar uzlabotu izkārtojumu."""
+        main_frame = ttk.Frame(parent_frame, padding=15)
         main_frame.pack(fill=BOTH, expand=True)
 
         # Ritjosla visam automatizācijas saturam
@@ -1996,153 +6098,1073 @@ class OCRPDFApp(ttk.Window):
 
         # Iekšējais rāmis, kurā atradīsies visi automatizācijas rīki
         inner_automation_frame = ttk.Frame(automation_canvas)
-        automation_canvas.create_window((0, 0), window=inner_automation_frame, anchor="nw")
+        automation_canvas.create_window((0, 0), window=inner_automation_frame, anchor="nw",
+                                        width=automation_canvas.winfo_width())
+
+        # Piesaistām inner_automation_frame platumu canvas platumam
+        def _on_frame_configure(event):
+            automation_canvas.itemconfig(automation_canvas.find_withtag("inner_frame_window"), width=event.width)
+            automation_canvas.configure(scrollregion=automation_canvas.bbox("all"))
+
+        inner_automation_frame.bind('<Configure>', _on_frame_configure)
+        automation_canvas.bind('<Configure>', lambda e: automation_canvas.itemconfigure(
+            automation_canvas.find_withtag("inner_frame_window"), width=e.width))
+        automation_canvas.create_window((0, 0), window=inner_automation_frame, anchor="nw", tags="inner_frame_window")
 
         # --- Automātiskās skenēšanas uzraudzība ---
         scan_monitor_frame = ttk.LabelFrame(inner_automation_frame, text="Automātiskā skenēšanas mapes uzraudzība",
-                                            padding=10)
-        scan_monitor_frame.pack(fill=X, padx=5, pady=5)
+                                            padding=20)
+        scan_monitor_frame.pack(fill=X, padx=10, pady=10)
+        scan_monitor_frame.columnconfigure(1, weight=1)  # Ļauj ievades laukam izstiepties
 
-        ttk.Label(scan_monitor_frame, text="Skenēšanas mapes ceļš:").grid(row=0, column=0, sticky=W, pady=2)
-        self.scan_folder_entry = ttk.Entry(scan_monitor_frame, textvariable=self.scan_folder_path, width=50)
-        self.scan_folder_entry.grid(row=0, column=1, sticky=EW, padx=5, pady=2)
-        ttk.Button(scan_monitor_frame, text="Pārlūkot...", command=self.browse_scan_folder).grid(row=0, column=2,
-                                                                                                 padx=5)
+        # --- Papildu automatizācijas rīki ---
+        additional_automation_frame = ttk.LabelFrame(inner_automation_frame, text="Papildu automatizācijas rīki",
+                                                     padding=20)
+        additional_automation_frame.pack(fill=X, padx=10, pady=10)
+        additional_automation_frame.columnconfigure(0, weight=1) # Lai pogas izstieptos
+        additional_automation_frame.columnconfigure(1, weight=1) # Lai pogas izstieptos
+
+        # Pogu režģis jaunajām funkcijām
+        self._create_button_grid(additional_automation_frame, [
+            ("Automātiska pārdēvēšana", self.show_auto_rename_dialog, "file-earmark-text"),
+            ("Automātiska PDF apvienošana", self.show_auto_merge_dialog, "file-earmark-ruled"),
+            ("Automātiska PDF sadalīšana", self.show_auto_split_dialog, "files"),
+            ("Automātiska metadatu pievienošana", self.show_auto_metadata_dialog, "tags"),
+            ("Automātiska dokumentu klasifikācija", self.show_auto_classify_dialog, "folder-symlink")
+        ], cols=2) # Izmantojam 2 kolonnas, lai izskatītos labāk
+
+        ttk.Label(scan_monitor_frame, text="Skenēšanas mapes ceļš:", font=("Helvetica", 10, "bold")).grid(row=0,
+                                                                                                          column=0,
+                                                                                                          sticky=W,
+                                                                                                          pady=5,
+                                                                                                          padx=5)
+        self.scan_folder_entry = ttk.Entry(scan_monitor_frame, textvariable=self.scan_folder_path,
+                                           font=("Helvetica", 10))
+        self.scan_folder_entry.grid(row=0, column=1, sticky=EW, pady=5, padx=5)
+        ttk.Button(scan_monitor_frame, text="Pārlūkot...", command=self.browse_scan_folder,
+                   bootstyle="secondary", image=self._get_icon("folder-open"), compound=tk.LEFT).grid(row=0, column=2,
+                                                                                                      padx=5, pady=5)
 
         ttk.Checkbutton(scan_monitor_frame, text="Iespējot automātisko skenēšanu", variable=self.auto_scan_enabled,
-                        command=self.toggle_auto_scan).grid(row=1, column=0, columnspan=3, sticky=W, pady=5)
+                        command=self.toggle_auto_scan, bootstyle="round-toggle").grid(row=1, column=0, columnspan=2,
+                                                                                      sticky=W, pady=10, padx=5)
 
-        self.auto_scan_status_label = ttk.Label(scan_monitor_frame, text="Statuss: Izslēgts", bootstyle="info")
-        self.auto_scan_status_label.grid(row=2, column=0, columnspan=3, sticky=W, pady=5)
-
-        scan_monitor_frame.columnconfigure(1, weight=1)
+        self.auto_scan_status_label = ttk.Label(scan_monitor_frame, text="Statuss: Izslēgts", bootstyle="info",
+                                                font=("Helvetica", 10, "italic"))
+        self.auto_scan_status_label.grid(row=2, column=0, columnspan=3, sticky=W, pady=5, padx=5)
 
         # --- Attālinātās glabāšanas iestatījumi ---
         remote_storage_frame = ttk.LabelFrame(inner_automation_frame, text="Attālinātās glabāšanas iestatījumi",
-                                              padding=10)
-        remote_storage_frame.pack(fill=X, padx=5, pady=10)
+                                              padding=20)
+        remote_storage_frame.pack(fill=X, padx=10, pady=10)
+        remote_storage_frame.columnconfigure(1, weight=1)  # Ļauj combobox izstiepties
 
-        ttk.Label(remote_storage_frame, text="Glabāšanas veids:").grid(row=0, column=0, sticky=W, pady=2)
+        # JAUNS: Google Sheets integrācijas iestatījumi
+        google_sheets_frame = ttk.LabelFrame(inner_automation_frame, text="Google Sheets integrācija", padding=20)
+        google_sheets_frame.pack(fill=X, padx=10, pady=10)
+        google_sheets_frame.columnconfigure(1, weight=1)
+        ttk.Label(google_sheets_frame, text="Google Sheet ID:", font=("Helvetica", 10, "bold")).grid(row=0, column=0,
+                                                                                                     sticky=W, pady=5,
+                                                                                                     padx=5)
+        ttk.Entry(google_sheets_frame, textvariable=self.google_sheet_id, font=("Helvetica", 10)).grid(row=0, column=1,
+                                                                                                       sticky=EW,
+                                                                                                       pady=5, padx=5)
+        ttk.Button(google_sheets_frame, text="Pārlūkot...",
+                   command=lambda: self.browse_file_path(self.google_sheet_id, "Izvēlēties Google Sheet ID"),
+                   bootstyle="secondary").grid(row=0, column=2, padx=5, pady=5)
+        ttk.Label(google_sheets_frame, text="Lapas nosaukums:", font=("Helvetica", 10, "bold")).grid(row=1, column=0,
+                                                                                                     sticky=W, pady=5,
+                                                                                                     padx=5)
+        ttk.Entry(google_sheets_frame, textvariable=self.google_sheet_name, font=("Helvetica", 10)).grid(row=1,
+                                                                                                         column=1,
+                                                                                                         sticky=EW,
+                                                                                                         pady=5, padx=5)
+        ttk.Label(google_sheets_frame, text="Akreditācijas fails:", font=("Helvetica", 10, "bold")).grid(row=2,
+                                                                                                         column=0,
+                                                                                                         sticky=W,
+                                                                                                         pady=5, padx=5)
+        ttk.Entry(google_sheets_frame, textvariable=self.google_sheet_credentials_path, font=("Helvetica", 10)).grid(
+            row=2, column=1, sticky=EW, pady=5, padx=5)
+        ttk.Button(google_sheets_frame, text="Pārlūkot...",
+                   command=lambda: self.browse_file_path(self.google_sheet_credentials_path,
+                                                         "Izvēlēties Google Sheets akreditācijas failu",
+                                                         [("JSON files", "*.json")]), bootstyle="secondary").grid(row=2,
+                                                                                                                  column=2,
+                                                                                                                  padx=5,
+                                                                                                                  pady=5)
+        ttk.Button(google_sheets_frame, text="Autentificēties Google", command=self.authenticate_google_apis,
+                   bootstyle="primary").grid(row=3, column=0, columnspan=3, pady=10)
+        self.google_auth_status_label = ttk.Label(google_sheets_frame, text="Statuss: Nav autentificēts",
+                                                  bootstyle="info", font=("Helvetica", 10, "italic"))
+        self.google_auth_status_label.grid(row=4, column=0, columnspan=3, sticky=W, pady=5, padx=5)
+        ttk.Checkbutton(google_sheets_frame, text="Automātiski atjaunināt Google Sheet",
+                        variable=self.auto_upload_enabled, command=self.toggle_google_sheet_update,
+                        bootstyle="round-toggle").grid(row=5, column=0, columnspan=3, sticky=W, pady=10, padx=5)
+        # Pievienojiet šo pogu, lai manuāli atjauninātu Google Sheet
+        ttk.Button(google_sheets_frame, text="Manuāli atjaunināt Google Sheet",
+                   command=self.update_google_sheet_from_archive, bootstyle="info").grid(row=6, column=0, columnspan=3,
+                                                                                         pady=10)
+
+        ttk.Label(remote_storage_frame, text="Glabāšanas veids:", font=("Helvetica", 10, "bold")).grid(row=0, column=0,
+                                                                                                       sticky=W, pady=5,
+                                                                                                       padx=5)
         self.remote_storage_type_combo = ttk.Combobox(remote_storage_frame, textvariable=self.remote_storage_type,
-                                                      values=["Local", "FTP", "SFTP", "Google Drive"], state="readonly")
-        self.remote_storage_type_combo.grid(row=0, column=1, sticky=EW, padx=5, pady=2)
+                                                      values=["Local", "FTP", "SFTP", "Google Drive"], state="readonly",
+                                                      font=("Helvetica", 10))
+        self.remote_storage_type_combo.grid(row=0, column=1, sticky=EW, pady=5, padx=5)
         self.remote_storage_type_combo.bind("<<ComboboxSelected>>", self.update_remote_storage_fields)
 
         # FTP/SFTP iestatījumi
-        self.ftp_settings_frame = ttk.LabelFrame(remote_storage_frame, text="FTP/SFTP iestatījumi", padding=5)
-        self.ftp_settings_frame.grid(row=1, column=0, columnspan=2, sticky=EW, padx=5, pady=5)
-
-        ttk.Label(self.ftp_settings_frame, text="Host:").grid(row=0, column=0, sticky=W, pady=2)
-        ttk.Entry(self.ftp_settings_frame, textvariable=self.ftp_host).grid(row=0, column=1, sticky=EW, padx=5, pady=2)
-        ttk.Label(self.ftp_settings_frame, text="Port:").grid(row=0, column=2, sticky=W, pady=2)
-        ttk.Entry(self.ftp_settings_frame, textvariable=self.ftp_port).grid(row=0, column=3, sticky=EW, padx=5, pady=2)
-
-        ttk.Label(self.ftp_settings_frame, text="Lietotājvārds:").grid(row=1, column=0, sticky=W, pady=2)
-        ttk.Entry(self.ftp_settings_frame, textvariable=self.ftp_user).grid(row=1, column=1, sticky=EW, padx=5, pady=2)
-        ttk.Label(self.ftp_settings_frame, text="Parole:").grid(row=1, column=2, sticky=W, pady=2)
-        ttk.Entry(self.ftp_settings_frame, textvariable=self.ftp_pass, show="*").grid(row=1, column=3, sticky=EW,
-                                                                                      padx=5, pady=2)
-
-        ttk.Label(self.ftp_settings_frame, text="Attālā mape:").grid(row=2, column=0, sticky=W, pady=2)
-        ttk.Entry(self.ftp_settings_frame, textvariable=self.ftp_remote_path).grid(row=2, column=1, columnspan=3,
-                                                                                   sticky=EW, padx=5, pady=2)
-
-        ttk.Checkbutton(self.ftp_settings_frame, text="Izmantot SFTP", variable=self.ftp_use_sftp).grid(row=3, column=0,
-                                                                                                        columnspan=4,
-                                                                                                        sticky=W,
-                                                                                                        pady=5)
-        ttk.Button(self.ftp_settings_frame, text="Pārbaudīt savienojumu", command=self.test_ftp_connection,
-                   bootstyle=INFO).grid(row=4, column=0, columnspan=4, pady=5)
+        self.ftp_settings_frame = ttk.LabelFrame(remote_storage_frame, text="FTP/SFTP iestatījumi", padding=15)
+        self.ftp_settings_frame.grid(row=1, column=0, columnspan=2, sticky=EW, padx=5, pady=10)
         self.ftp_settings_frame.columnconfigure(1, weight=1)
         self.ftp_settings_frame.columnconfigure(3, weight=1)
 
+        ttk.Label(self.ftp_settings_frame, text="Host:", font=("Helvetica", 9)).grid(row=0, column=0, sticky=W, pady=2,
+                                                                                     padx=5)
+        ttk.Entry(self.ftp_settings_frame, textvariable=self.ftp_host, font=("Helvetica", 9)).grid(row=0, column=1,
+                                                                                                   sticky=EW, pady=2,
+                                                                                                   padx=5)
+        ttk.Label(self.ftp_settings_frame, text="Port:", font=("Helvetica", 9)).grid(row=0, column=2, sticky=W, pady=2,
+                                                                                     padx=5)
+        ttk.Entry(self.ftp_settings_frame, textvariable=self.ftp_port, font=("Helvetica", 9)).grid(row=0, column=3,
+                                                                                                   sticky=EW, pady=2,
+                                                                                                   padx=5)
+
+        ttk.Label(self.ftp_settings_frame, text="Lietotājvārds:", font=("Helvetica", 9)).grid(row=1, column=0, sticky=W,
+                                                                                              pady=2, padx=5)
+        ttk.Entry(self.ftp_settings_frame, textvariable=self.ftp_user, font=("Helvetica", 9)).grid(row=1, column=1,
+                                                                                                   sticky=EW, pady=2,
+                                                                                                   padx=5)
+        ttk.Label(self.ftp_settings_frame, text="Parole:", font=("Helvetica", 9)).grid(row=1, column=2, sticky=W,
+                                                                                       pady=2, padx=5)
+        ttk.Entry(self.ftp_settings_frame, textvariable=self.ftp_pass, show="*", font=("Helvetica", 9)).grid(row=1,
+                                                                                                             column=3,
+                                                                                                             sticky=EW,
+                                                                                                             pady=2,
+                                                                                                             padx=5)
+
+        ttk.Label(self.ftp_settings_frame, text="Attālā mape:", font=("Helvetica", 9)).grid(row=2, column=0, sticky=W,
+                                                                                            pady=2, padx=5)
+        ttk.Entry(self.ftp_settings_frame, textvariable=self.ftp_remote_path, font=("Helvetica", 9)).grid(row=2,
+                                                                                                          column=1,
+                                                                                                          columnspan=3,
+                                                                                                          sticky=EW,
+                                                                                                          pady=2,
+                                                                                                          padx=5)
+
+        ttk.Checkbutton(self.ftp_settings_frame, text="Izmantot SFTP (drošs savienojums)", variable=self.ftp_use_sftp,
+                        bootstyle="round-toggle").grid(row=3, column=0, columnspan=4, sticky=W, pady=10, padx=5)
+        ttk.Button(self.ftp_settings_frame, text="Pārbaudīt savienojumu", command=self.test_ftp_connection,
+                   bootstyle="info", image=self._get_icon("plug-fill"), compound=tk.LEFT).grid(row=4, column=0,
+                                                                                               columnspan=4, pady=5,
+                                                                                               padx=5)
+
         # Google Drive iestatījumi
         self.google_drive_settings_frame = ttk.LabelFrame(remote_storage_frame, text="Google Drive iestatījumi",
-                                                          padding=5)
-        self.google_drive_settings_frame.grid(row=2, column=0, columnspan=2, sticky=EW, padx=5, pady=5)
-
-        ttk.Label(self.google_drive_settings_frame, text="Mapes ID:").grid(row=0, column=0, sticky=W, pady=2)
-        ttk.Entry(self.google_drive_settings_frame, textvariable=self.google_drive_folder_id).grid(row=0, column=1,
-                                                                                                   sticky=EW, padx=5,
-                                                                                                   pady=2)
-
-        ttk.Label(self.google_drive_settings_frame, text="Akreditācijas fails:").grid(row=1, column=0, sticky=W, pady=2)
-        ttk.Entry(self.google_drive_settings_frame, textvariable=self.google_drive_credentials_path).grid(row=1,
-                                                                                                          column=1,
-                                                                                                          sticky=EW,
-                                                                                                          padx=5,
-                                                                                                          pady=2)
-        ttk.Button(self.google_drive_settings_frame, text="Pārlūkot...", command=self.browse_google_credentials).grid(
-            row=1, column=2, padx=5)
-
-        ttk.Label(self.google_drive_settings_frame, text="Token fails:").grid(row=2, column=0, sticky=W, pady=2)
-        ttk.Entry(self.google_drive_settings_frame, textvariable=self.google_drive_token_path).grid(row=2, column=1,
-                                                                                                    sticky=EW, padx=5,
-                                                                                                    pady=2)
-        ttk.Button(self.google_drive_settings_frame, text="Pārlūkot...", command=self.browse_google_token).grid(row=2,
-                                                                                                                column=2,
-                                                                                                                padx=5)
-
-        ttk.Button(self.google_drive_settings_frame, text="Autorizēties", command=self.authorize_google_drive,
-                   bootstyle=INFO).grid(row=3, column=0, columnspan=3, pady=5)
+                                                          padding=15)
+        self.google_drive_settings_frame.grid(row=2, column=0, columnspan=2, sticky=EW, padx=5, pady=10)
         self.google_drive_settings_frame.columnconfigure(1, weight=1)
 
-        remote_storage_frame.columnconfigure(1, weight=1)
+        ttk.Label(self.google_drive_settings_frame, text="Mapes ID:", font=("Helvetica", 9)).grid(row=0, column=0,
+                                                                                                  sticky=W, pady=2,
+                                                                                                  padx=5)
+        ttk.Entry(self.google_drive_settings_frame, textvariable=self.google_drive_folder_id,
+                  font=("Helvetica", 9)).grid(row=0, column=1, sticky=EW, pady=2, padx=5)
+
+        ttk.Label(self.google_drive_settings_frame, text="Akreditācijas ceļš:", font=("Helvetica", 9)).grid(row=1,
+                                                                                                            column=0,
+                                                                                                            sticky=W,
+                                                                                                            pady=2,
+                                                                                                            padx=5)
+        ttk.Entry(self.google_drive_settings_frame, textvariable=self.google_drive_credentials_path,
+                  font=("Helvetica", 9)).grid(row=1, column=1, sticky=EW, pady=2, padx=5)
+        ttk.Button(self.google_drive_settings_frame, text="Pārlūkot...", command=self.browse_google_credentials,
+                   bootstyle="secondary", image=self._get_icon("file-earmark-text"), compound=tk.LEFT).grid(row=1,
+                                                                                                            column=2,
+                                                                                                            padx=5,
+                                                                                                            pady=2)
+
+        ttk.Label(self.google_drive_settings_frame, text="Token ceļš:", font=("Helvetica", 9)).grid(row=2, column=0,
+                                                                                                    sticky=W, pady=2,
+                                                                                                    padx=5)
+        ttk.Entry(self.google_drive_settings_frame, textvariable=self.google_drive_token_path,
+                  font=("Helvetica", 9)).grid(row=2, column=1, sticky=EW, pady=2, padx=5)
+        ttk.Button(self.google_drive_settings_frame, text="Pārlūkot...", command=self.browse_google_token,
+                   bootstyle="secondary", image=self._get_icon("key-fill"), compound=tk.LEFT).grid(row=2, column=2,
+                                                                                                   padx=5, pady=2)
+
+        ttk.Button(self.google_drive_settings_frame, text="Autorizēties Google Drive",
+                   command=self.authorize_google_drive,
+                   bootstyle="info", image=self._get_icon("google"), compound=tk.LEFT).grid(row=3, column=0,
+                                                                                            columnspan=3, pady=5,
+                                                                                            padx=5)
 
         # --- Automātiskās augšupielādes iestatījumi ---
-        auto_upload_frame = ttk.LabelFrame(inner_automation_frame, text="Automātiskā augšupielāde", padding=10)
-        auto_upload_frame.pack(fill=X, padx=5, pady=10)
+        auto_upload_frame = ttk.LabelFrame(inner_automation_frame, text="Automātiskās augšupielādes iestatījumi",
+                                           padding=20)
+        auto_upload_frame.pack(fill=X, padx=10, pady=10)
+        auto_upload_frame.columnconfigure(1, weight=1)
 
         ttk.Checkbutton(auto_upload_frame, text="Iespējot automātisko augšupielādi pēc OCR",
                         variable=self.auto_upload_enabled,
-                        command=self.toggle_auto_upload).grid(row=0, column=0, columnspan=2, sticky=W, pady=5)
+                        bootstyle="round-toggle").grid(row=0, column=0, columnspan=2, sticky=W, pady=10, padx=5)
 
-        ttk.Label(auto_upload_frame, text="Augšupielādēt uz:").grid(row=1, column=0, sticky=W, pady=2)
+        ttk.Label(auto_upload_frame, text="Augšupielādes mērķis:", font=("Helvetica", 10, "bold")).grid(row=1, column=0,
+                                                                                                        sticky=W,
+                                                                                                        pady=5, padx=5)
         self.auto_upload_target_combo = ttk.Combobox(auto_upload_frame, textvariable=self.auto_upload_target,
-                                                     values=["Local", "FTP", "SFTP", "Google Drive"], state="readonly")
-        self.auto_upload_target_combo.grid(row=1, column=1, sticky=EW, padx=5, pady=2)
+                                                     values=["Local", "FTP", "SFTP", "Google Drive"], state="readonly",
+                                                     font=("Helvetica", 10))
+        self.auto_upload_target_combo.grid(row=1, column=1, sticky=EW, pady=5, padx=5)
 
-        auto_upload_frame.columnconfigure(1, weight=1)
+        # Sākotnējā lauku atjaunināšana
+        self.update_remote_storage_fields()
 
-        # --- Skenēto dokumentu saraksts (Automatizācijas cilnē) ---
-        scanned_docs_frame = ttk.LabelFrame(inner_automation_frame, text="Skenētie dokumenti (uzraudzītā mapē)",
-                                            padding=10)
-        scanned_docs_frame.pack(fill=BOTH, expand=True, padx=5, pady=10)
+        # Pievienojiet jaunas funkcijas, kas tiek izsauktas no pogām
+        # Šīs funkcijas ir jāpievieno jūsu OCRPDFApp klasē
+        # (Ja tās jau eksistē, tad tās nav jāpievieno, bet jāpārliecinās, ka tās ir pareizi implementētas)
 
-        self.scanned_docs_listbox = tk.Listbox(scanned_docs_frame, selectmode=tk.SINGLE, exportselection=False)
-        self.scanned_docs_listbox.pack(side=LEFT, fill="both", expand=True)
+    # --- Jaunas automatizācijas funkcijas ---
 
-        scanned_docs_scrollbar = ttk.Scrollbar(scanned_docs_frame, orient="vertical",
-                                               command=self.scanned_docs_listbox.yview)
-        scanned_docs_scrollbar.pack(side=RIGHT, fill="y")
-        self.scanned_docs_listbox.config(yscrollcommand=scanned_docs_scrollbar.set)
+    def show_auto_rename_dialog(self):
+        """Parāda dialogu automātiskai failu pārdēvēšanai."""
+        dialog = Toplevel(self)
+        dialog.title("Automātiska pārdēvēšana")
+        dialog.geometry("400x250")
+        dialog.transient(self)
+        dialog.grab_set()
 
-        self.scanned_docs_listbox.bind("<<ListboxSelect>>", self.on_scanned_doc_select)
-        self.scanned_docs_listbox.bind("<Double-Button-1>", self.open_scanned_doc_location)
+        ttk.Label(dialog, text="Pārdēvēt failus, pamatojoties uz:").pack(pady=10)
 
-        # Ielādē saglabātos iestatījumus un atjaunina UI
-        self.scan_folder_path.set(
-            self.settings.get("scan_folder_path", os.path.join(os.path.expanduser("~"), "ScannedDocuments")))
-        self.auto_scan_enabled.set(self.settings.get("auto_scan_enabled", False))
-        self.remote_storage_type.set(self.settings.get("remote_storage_type", "Local"))
-        self.ftp_host.set(self.settings.get("ftp_host", ""))
-        self.ftp_port.set(self.settings.get("ftp_port", 21))
-        self.ftp_user.set(self.settings.get("ftp_user", ""))
-        self.ftp_pass.set(self.settings.get("ftp_pass", ""))
-        self.ftp_remote_path.set(self.settings.get("ftp_remote_path", "/"))
-        self.ftp_use_sftp.set(self.settings.get("ftp_use_sftp", False))
-        self.google_drive_folder_id.set(self.settings.get("google_drive_folder_id", ""))
-        self.google_drive_credentials_path.set(self.settings.get("google_drive_credentials_path", "credentials.json"))
-        self.google_drive_token_path.set(self.settings.get("google_drive_token_path", "token.json"))
-        self.auto_upload_enabled.set(self.settings.get("auto_upload_enabled", False))
-        self.auto_upload_target.set(self.settings.get("auto_upload_target", "Local"))
+        rename_option = tk.StringVar(value="ocr_text")
+        ttk.Radiobutton(dialog, text="OCR tekstu (pirmās 20 zīmes)", variable=rename_option, value="ocr_text").pack(
+            anchor="w", padx=20)
+        ttk.Radiobutton(dialog, text="Datumu un laiku", variable=rename_option, value="datetime").pack(anchor="w",
+                                                                                                       padx=20)
+        ttk.Radiobutton(dialog, text="Atslēgvārdu (ja atrasts)", variable=rename_option, value="keyword").pack(
+            anchor="w", padx=20)
 
-        self.update_remote_storage_fields()  # Atjaunina redzamos laukus
-        self.update_auto_scan_status()  # Atjaunina statusu pēc ielādes
-        self.refresh_scanned_docs_list()  # Atjaunina skenēto dokumentu sarakstu
+        ttk.Button(dialog, text="Sākt pārdēvēšanu",
+                   command=lambda: self.perform_auto_rename(rename_option.get(), dialog)).pack(pady=20)
 
+    def authenticate_google_apis(self):
+        """Autentificējas Google Drive un Google Sheets API."""
+        creds_path = self.google_sheet_credentials_path.get()
+        if not os.path.exists(creds_path):
+            messagebox.showerror("Kļūda", f"Akreditācijas fails nav atrasts: {creds_path}")
+            self.google_auth_status_label.config(text="Statuss: Kļūda (fails nav atrasts)", bootstyle="danger")
+            return
+
+        try:
+            from google.oauth2.service_account import Credentials
+            from googleapiclient.discovery import build
+
+            SCOPES = ['https://www.googleapis.com/auth/drive', 'https://www.googleapis.com/auth/spreadsheets']
+            creds = Credentials.from_service_account_file(creds_path, scopes=SCOPES)
+
+            self.google_drive_service = build('drive', 'v3', credentials=creds)
+            self.google_sheet_service = build('sheets', 'v4', credentials=creds)
+
+            # Pārbaude, vai autentifikācija ir veiksmīga
+            # Mēģinām iegūt informāciju par Google Drive saknes mapi
+            self.google_drive_service.files().get(fileId='root').execute()
+            # Mēģinām iegūt informāciju par Google Sheet
+            if self.google_sheet_id.get():
+                self.google_sheet_service.spreadsheets().get(spreadsheetId=self.google_sheet_id.get()).execute()
+
+            self.google_auth_status_label.config(text="Statuss: Autentificēts ✅", bootstyle="success")
+            messagebox.showinfo("Autentifikācija", "Veiksmīgi autentificēts Google Drive un Google Sheets API!")
+        except Exception as e:
+            messagebox.showerror("Autentifikācijas kļūda", f"Neizdevās autentificēties Google API: {e}")
+            self.google_auth_status_label.config(text=f"Statuss: Kļūda ({e})", bootstyle="danger")
+            self.google_drive_service = None
+            self.google_sheet_service = None
+
+    def toggle_google_sheet_update(self):
+        """Ieslēdz/izslēdz automātisko Google Sheet atjaunināšanu."""
+        if self.auto_upload_enabled.get():
+            self.update_google_sheet_from_archive()
+        else:
+            messagebox.showinfo("Automātiskā atjaunināšana", "Automātiskā Google Sheet atjaunināšana izslēgta.")
+
+    def upload_file_to_google_drive(self, file_path, folder_id=None):
+        """Augšupielādē failu Google Drive un atgriež faila ID un kopīgošanas saiti."""
+        if not self.google_drive_service:
+            messagebox.showerror("Kļūda", "Google Drive pakalpojums nav autentificēts.")
+            return None, None
+
+        try:
+            from googleapiclient.http import MediaFileUpload
+
+            file_name = os.path.basename(file_path)
+            file_metadata = {'name': file_name}
+            if folder_id:
+                file_metadata['parents'] = [folder_id]
+
+            media = MediaFileUpload(file_path, mimetype='application/pdf') # Pieņemam, ka augšupielādējam PDF
+            file = self.google_drive_service.files().create(
+                body=file_metadata,
+                media_body=media,
+                fields='id, webViewLink'
+            ).execute()
+
+            file_id = file.get('id')
+            web_view_link = file.get('webViewLink')
+
+            # Iestatīt faila kopīgošanas atļaujas (publiski pieejams ar saiti)
+            self.google_drive_service.permissions().create(
+                fileId=file_id,
+                body={'type': 'anyone', 'role': 'reader'},
+                fields='id'
+            ).execute()
+
+            print(f"Fails augšupielādēts: {file_name}, ID: {file_id}, Saite: {web_view_link}")
+            return file_id, web_view_link
+        except Exception as e:
+            messagebox.showerror("Google Drive augšupielādes kļūda", f"Neizdevās augšupielādēt failu Google Drive: {e}")
+            return None, None
+
+    def update_google_sheet_entry(self, file_info):
+        """Atjaunina Google Sheet ar faila informāciju."""
+        if not self.google_sheet_service or not self.google_sheet_id.get() or not self.google_sheet_name.get():
+            print("Google Sheet pakalpojums nav autentificēts vai iestatījumi nav konfigurēti.")
+            return
+
+        try:
+            spreadsheet_id = self.google_sheet_id.get()
+            range_name = f"{self.google_sheet_name.get()}!A:Z" # Meklējam visā lapā
+
+            # Pārbaudām, vai lapa eksistē, ja nē, izveidojam to
+            try:
+                self.google_sheet_service.spreadsheets().get(spreadsheetId=spreadsheet_id).execute()
+            except Exception:
+                # Lapa neeksistē, mēģinām izveidot
+                body = {
+                    'requests': [{
+                        'addSheet': {
+                            'properties': {
+                                'title': self.google_sheet_name.get()
+                            }
+                        }
+                    }]
+                }
+                self.google_sheet_service.spreadsheets().batchUpdate(spreadsheetId=spreadsheet_id, body=body).execute()
+                print(f"Izveidota jauna lapa: {self.google_sheet_name.get()}")
+                # Pievienojam galvenes
+                header_values = [
+                    "Faila nosaukums", "Faila ID (iekšējais)", "Faila ceļš (lokālais)",
+                    "Dokumenta ID (piešķirtais)", "Izveides datums", "Mapes ceļš (iekšējais)",
+                    "Google Drive ID", "Google Drive Saite"
+                ]
+                self.google_sheet_service.spreadsheets().values().update(
+                    spreadsheetId=spreadsheet_id,
+                    range=f"{self.google_sheet_name.get()}!A1",
+                    valueInputOption='RAW',
+                    body={'values': [header_values]}
+                ).execute()
+
+
+            # Iegūstam esošos datus, lai atrastu, vai ieraksts jau eksistē
+            result = self.google_sheet_service.spreadsheets().values().get(spreadsheetId=spreadsheet_id, range=range_name).execute()
+            values = result.get('values', [])
+
+            # Meklējam ierakstu pēc faila ID (iekšējais)
+            row_index_to_update = -1
+            if values:
+                for i, row in enumerate(values):
+                    if len(row) > 1 and row[1] == file_info.get("doc_id"): # Pārbaudām iekšējo faila ID
+                        row_index_to_update = i
+                        break
+
+            # Sagatavojam datus
+            row_data = [
+                file_info.get("name", ""),
+                file_info.get("doc_id", ""),
+                file_info.get("filepath", ""),
+                file_info.get("assigned_id", ""), # Ja jums ir šāds lauks
+                file_info.get("date", ""),
+                file_info.get("internal_folder_path", ""), # Jums būs jāaprēķina šis ceļš
+                file_info.get("google_drive_id", ""),
+                file_info.get("google_drive_link", "")
+            ]
+
+            if row_index_to_update != -1:
+                # Atjauninām esošo rindu
+                update_range = f"{self.google_sheet_name.get()}!A{row_index_to_update + 1}"
+                self.google_sheet_service.spreadsheets().values().update(
+                    spreadsheetId=spreadsheet_id,
+                    range=update_range,
+                    valueInputOption='RAW',
+                    body={'values': [row_data]}
+                ).execute()
+                print(f"Google Sheet ieraksts atjaunināts rindā {row_index_to_update + 1}.")
+            else:
+                # Pievienojam jaunu rindu
+                append_range = f"{self.google_sheet_name.get()}!A:Z"
+                self.google_sheet_service.spreadsheets().values().append(
+                    spreadsheetId=spreadsheet_id,
+                    range=append_range,
+                    valueInputOption='RAW',
+                    body={'values': [row_data]}
+                ).execute()
+                print("Jauns ieraksts pievienots Google Sheet.")
+
+        except Exception as e:
+            messagebox.showerror("Google Sheet atjaunināšanas kļūda", f"Neizdevās atjaunināt Google Sheet: {e}")
+
+    def update_google_sheet_from_archive(self):
+        """Atjaunina visu Google Sheet, pamatojoties uz iekšējo failu sistēmu."""
+        if not self.google_sheet_service or not self.google_sheet_id.get() or not self.google_sheet_name.get():
+            messagebox.showwarning("Brīdinājums", "Google Sheet pakalpojums nav autentificēts vai iestatījumi nav konfigurēti.")
+            return
+
+        try:
+            spreadsheet_id = self.google_sheet_id.get()
+            sheet_name = self.google_sheet_name.get()
+
+            # Notīrām esošos datus (izņemot galvenes rindu)
+            clear_range = f"{sheet_name}!A2:Z" # Sākot no otrās rindas
+            self.google_sheet_service.spreadsheets().values().clear(spreadsheetId=spreadsheet_id, range=clear_range).execute()
+
+            # Pievienojam galvenes, ja tās nav
+            header_values = [
+                "Faila nosaukums", "Faila ID (iekšējais)", "Faila ceļš (lokālais)",
+                "Dokumenta ID (piešķirtais)", "Izveides datums", "Mapes ceļš (iekšējais)",
+                "Google Drive ID", "Google Drive Saite"
+            ]
+            self.google_sheet_service.spreadsheets().values().update(
+                spreadsheetId=spreadsheet_id,
+                range=f"{sheet_name}!A1",
+                valueInputOption='RAW',
+                body={'values': [header_values]}
+            ).execute()
+
+            all_files_info = []
+            # Rekursīvi iegūstam visu failu informāciju no iekšējās failu sistēmas
+            def collect_file_info(node, current_path=""):
+                if node["type"] == "file":
+                    file_info = {
+                        "name": node.get("name", ""),
+                        "doc_id": node.get("doc_id", ""),
+                        "filepath": node.get("filepath", ""),
+                        "assigned_id": node.get("assigned_id", ""), # Pievienojiet, ja jums ir šāds lauks
+                        "date": node.get("date", ""),
+                        "internal_folder_path": current_path,
+                        "google_drive_id": node.get("google_drive_id", ""),
+                        "google_drive_link": node.get("google_drive_link", "")
+                    }
+                    all_files_info.append(file_info)
+                elif node["type"] == "folder":
+                    new_path = os.path.join(current_path, node["name"]) if current_path else node["name"]
+                    for item in node.get("contents", []):
+                        collect_file_info(item, new_path)
+
+            collect_file_info(self.internal_file_system, "")
+
+            if all_files_info:
+                rows_to_append = []
+                for file_info in all_files_info:
+                    rows_to_append.append([
+                        file_info.get("name", ""),
+                        file_info.get("doc_id", ""),
+                        file_info.get("filepath", ""),
+                        file_info.get("assigned_id", ""),
+                        file_info.get("date", ""),
+                        file_info.get("internal_folder_path", ""),
+                        file_info.get("google_drive_id", ""),
+                        file_info.get("google_drive_link", "")
+                    ])
+
+                self.google_sheet_service.spreadsheets().values().append(
+                    spreadsheetId=spreadsheet_id,
+                    range=f"{sheet_name}!A:Z",
+                    valueInputOption='RAW',
+                    body={'values': rows_to_append}
+                ).execute()
+                messagebox.showinfo("Google Sheet atjaunināšana", f"Google Sheet veiksmīgi atjaunināts ar {len(rows_to_append)} ierakstiem.")
+            else:
+                messagebox.showinfo("Google Sheet atjaunināšana", "Nav failu, ko pievienot Google Sheet.")
+
+        except Exception as e:
+            messagebox.showerror("Google Sheet atjaunināšanas kļūda", f"Neizdevās atjaunināt Google Sheet: {e}")
+
+    def browse_file_path(self, tk_string_var, title, filetypes=None):
+        """Atver failu pārlūka dialogu un iestata izvēlēto ceļu tk.StringVar."""
+        if filetypes is None:
+            filetypes = [("All files", "*.*")]
+        filepath = filedialog.askopenfilename(title=title, filetypes=filetypes)
+        if filepath:
+            tk_string_var.set(filepath)
+
+    def browse_folder_path(self, tk_string_var, title):
+        """Atver mapes pārlūka dialogu un iestata izvēlēto ceļu tk.StringVar."""
+        folderpath = filedialog.askdirectory(title=title)
+        if folderpath:
+            tk_string_var.set(folderpath)
+
+    def perform_auto_rename(self, option, dialog):
+        """Veic automātisku failu pārdēvēšanu."""
+        dialog.destroy()
+        if not self.images:
+            messagebox.showwarning("Nav failu", "Nav ielādētu attēlu vai PDF, ko pārdēvēt.")
+            return
+
+        renamed_count = 0
+        for i, item in enumerate(self.images):
+            original_filepath = item.get("filepath")
+            if not original_filepath or not os.path.exists(original_filepath):
+                continue
+
+            base_dir = os.path.dirname(original_filepath)
+            file_ext = os.path.splitext(original_filepath)[1]
+            new_name_base = ""
+
+            if option == "ocr_text" and self.ocr_results[i]:
+                ocr_text = self.ocr_results[i].strip()
+                if ocr_text:
+                    new_name_base = ocr_text[:20].replace('\n', '_').replace('/', '_').replace('\\', '_').strip()
+                    if not new_name_base:  # Ja pēc tīrīšanas nekas nepaliek
+                        new_name_base = "OCR_dokuments"
+                else:
+                    new_name_base = "Bez_OCR_teksta"
+            elif option == "datetime":
+                new_name_base = datetime.now().strftime("%Y%m%d_%H%M%S")
+            elif option == "keyword":
+                # Šeit varētu būt sarežģītāka loģika atslēgvārdu meklēšanai OCR rezultātos
+                # Vienkāršības labad, pieņemsim, ka meklējam "invoice" vai "receipt"
+                ocr_text = self.ocr_results[i].lower() if self.ocr_results[i] else ""
+                if "invoice" in ocr_text:
+                    new_name_base = "Rēķins"
+                elif "receipt" in ocr_text:
+                    new_name_base = "Čeks"
+                else:
+                    new_name_base = "Dokuments"
+            else:
+                new_name_base = "Pārdēvēts_fails"
+
+            new_filepath = os.path.join(base_dir, f"{new_name_base}{file_ext}")
+
+            # Pievienojam unikālu sufiksu, ja fails ar šādu nosaukumu jau eksistē
+            counter = 1
+            temp_filepath = new_filepath
+            while os.path.exists(temp_filepath) and temp_filepath != original_filepath:
+                temp_filepath = os.path.join(base_dir, f"{new_name_base}_{counter}{file_ext}")
+                counter += 1
+            new_filepath = temp_filepath
+
+            try:
+                os.rename(original_filepath, new_filepath)
+                item["filepath"] = new_filepath  # Atjaunina filepath iekšējā sarakstā
+                item["name"] = os.path.basename(new_filepath)  # Atjaunina nosaukumu
+                self.file_listbox.delete(i)
+                self.file_listbox.insert(i, item["name"])
+                renamed_count += 1
+            except Exception as e:
+                print(f"Kļūda pārdēvējot {original_filepath}: {e}")
+
+        self.refresh_file_listbox()  # Atsvaidzina failu sarakstu
+        messagebox.showinfo("Pārdēvēšana pabeigta", f"Veiksmīgi pārdēvēti {renamed_count} faili.")
+
+    def show_auto_merge_dialog(self):
+        """Parāda dialogu automātiskai PDF apvienošanai."""
+        dialog = Toplevel(self)
+        dialog.title("Automātiska PDF apvienošana")
+        dialog.geometry("400x200")
+        dialog.transient(self)
+        dialog.grab_set()
+
+        ttk.Label(dialog, text="Apvienot visus atlasītos PDF failus vienā.").pack(pady=10)
+        ttk.Label(dialog, text="Rezultāta faila nosaukums:").pack(pady=5)
+        self.merged_pdf_name_var = tk.StringVar(value="Apvienotais_dokuments.pdf")
+        ttk.Entry(dialog, textvariable=self.merged_pdf_name_var, width=40).pack(padx=10)
+
+        ttk.Button(dialog, text="Sākt apvienošanu", command=lambda: self.perform_auto_merge(dialog)).pack(pady=20)
+
+    def perform_auto_merge(self, dialog):
+        """Veic automātisku PDF apvienošanu."""
+        dialog.destroy()
+        selected_indices = self.file_listbox.curselection()
+        if not selected_indices:
+            messagebox.showwarning("Nav atlasīts", "Lūdzu, atlasiet vismaz divus PDF failus, ko apvienot.")
+            return
+        if len(selected_indices) < 2:
+            messagebox.showwarning("Nepietiek failu", "Lūdzu, atlasiet vismaz divus PDF failus, ko apvienot.")
+            return
+
+        pdf_paths_to_merge = []
+        for index in selected_indices:
+            item = self.images[index]
+            if item.get("filepath") and item["filepath"].lower().endswith(".pdf"):
+                pdf_paths_to_merge.append(item["filepath"])
+            else:
+                messagebox.showwarning("Nederīgs fails",
+                                       f"Fails '{item.get('name', 'Nezināms')}' nav PDF un tiks izlaists.")
+
+        if len(pdf_paths_to_merge) < 2:
+            messagebox.showwarning("Nepietiek PDF", "Pēc atlases filtrēšanas palika mazāk par diviem PDF failiem.")
+            return
+
+        output_filename = self.merged_pdf_name_var.get()
+        if not output_filename.lower().endswith(".pdf"):
+            output_filename += ".pdf"
+
+        # Izvēlas saglabāšanas mapi
+        save_path = filedialog.asksaveasfilename(
+            defaultextension=".pdf",
+            filetypes=[("PDF files", "*.pdf")],
+            initialfile=output_filename,
+            title="Saglabāt apvienoto PDF kā..."
+        )
+        if not save_path:
+            return  # Lietotājs atcēla
+
+        try:
+            pdf_merger = pypdf.PdfMerger()
+            for pdf_path in pdf_paths_to_merge:
+                pdf_merger.append(pdf_path)
+
+            with open(save_path, "wb") as output_file:
+                pdf_merger.write(output_file)
+            pdf_merger.close()
+
+            messagebox.showinfo("Apvienošana pabeigta", f"PDF faili veiksmīgi apvienoti: {save_path}")
+            # Pēc apvienošanas varat piedāvāt ielādēt jauno failu
+            self.open_files(save_path)
+
+        except Exception as e:
+            messagebox.showerror("Kļūda apvienošanā", f"Neizdevās apvienot PDF failus: {e}")
+
+    def show_auto_split_dialog(self):
+        """Parāda dialogu automātiskai PDF sadalīšanai."""
+        dialog = Toplevel(self)
+        dialog.title("Automātiska PDF sadalīšana")
+        dialog.geometry("450x300")
+        dialog.transient(self)
+        dialog.grab_set()
+
+        ttk.Label(dialog, text="Sadalīt atlasīto PDF failu pēc atslēgvārdiem vai lapu skaita.").pack(pady=10)
+
+        ttk.Label(dialog, text="Sadalīšanas veids:").pack(anchor="w", padx=10)
+        self.split_type_var = tk.StringVar(value="keyword")
+        ttk.Radiobutton(dialog, text="Pēc atslēgvārdiem (katra lapa ar atslēgvārdu sāk jaunu PDF)",
+                        variable=self.split_type_var, value="keyword").pack(anchor="w", padx=20)
+        ttk.Radiobutton(dialog, text="Pēc fiksēta lapu skaita", variable=self.split_type_var, value="pages").pack(
+            anchor="w", padx=20)
+
+        ttk.Label(dialog, text="Atslēgvārdi (atdalīti ar komatu) / Lapu skaits:").pack(anchor="w", padx=10, pady=5)
+        self.split_param_var = tk.StringVar()
+        ttk.Entry(dialog, textvariable=self.split_param_var, width=50).pack(padx=10, fill="x")
+
+        ttk.Button(dialog, text="Sākt sadalīšanu", command=lambda: self.perform_auto_split(dialog)).pack(pady=20)
+
+    def perform_auto_split(self, dialog):
+        """Veic automātisku PDF sadalīšanu."""
+        dialog.destroy()
+        selected_indices = self.file_listbox.curselection()
+        if not selected_indices:
+            messagebox.showwarning("Nav atlasīts", "Lūdzu, atlasiet vienu PDF failu, ko sadalīt.")
+            return
+        if len(selected_indices) > 1:
+            messagebox.showwarning("Pārāk daudz failu", "Lūdzu, atlasiet tikai vienu PDF failu, ko sadalīt.")
+            return
+
+        selected_item = self.images[selected_indices[0]]
+        pdf_path = selected_item.get("filepath")
+        if not pdf_path or not pdf_path.lower().endswith(".pdf"):
+            messagebox.showwarning("Nederīgs fails", "Atlasītais fails nav PDF.")
+            return
+
+        split_type = self.split_type_var.get()
+        split_param = self.split_param_var.get()
+
+        if not split_param:
+            messagebox.showwarning("Trūkst parametra", "Lūdzu, ievadiet atslēgvārdus vai lapu skaitu.")
+            return
+
+        output_folder = filedialog.askdirectory(title="Izvēlieties mapi sadalīto PDF saglabāšanai")
+        if not output_folder:
+            return  # Lietotājs atcēla
+
+        try:
+            reader = pypdf.PdfReader(pdf_path)
+            total_pages = len(reader.pages)
+            base_name = os.path.splitext(os.path.basename(pdf_path))[0]
+
+            if split_type == "pages":
+                pages_per_split = int(split_param)
+                if pages_per_split <= 0:
+                    messagebox.showerror("Kļūda", "Lapu skaitam jābūt lielākam par 0.")
+                    return
+
+                for i in range(0, total_pages, pages_per_split):
+                    writer = pypdf.PdfWriter()
+                    for j in range(i, min(i + pages_per_split, total_pages)):
+                        writer.add_page(reader.pages[j])
+
+                    output_filepath = os.path.join(output_folder, f"{base_name}_part_{i // pages_per_split + 1}.pdf")
+                    with open(output_filepath, "wb") as output_file:
+                        writer.write(output_file)
+                messagebox.showinfo("Sadalīšana pabeigta",
+                                    f"PDF sadalīts {total_pages // pages_per_split + (1 if total_pages % pages_per_split != 0 else 0)} daļās.")
+
+            elif split_type == "keyword":
+                keywords = [k.strip().lower() for k in split_param.split(',')]
+                current_writer = pypdf.PdfWriter()
+                part_num = 1
+
+                for i in range(total_pages):
+                    page = reader.pages[i]
+                    page_text = page.extract_text().lower() if page.extract_text() else ""
+
+                    is_keyword_page = any(keyword in page_text for keyword in keywords)
+
+                    if is_keyword_page and len(current_writer.pages) > 0:
+                        # Saglabā iepriekšējo daļu, ja ir lapas
+                        output_filepath = os.path.join(output_folder, f"{base_name}_part_{part_num}.pdf")
+                        with open(output_filepath, "wb") as output_file:
+                            current_writer.write(output_file)
+                        part_num += 1
+                        current_writer = pypdf.PdfWriter()  # Sāk jaunu daļu
+
+                    current_writer.add_page(page)
+
+                # Saglabā pēdējo daļu
+                if len(current_writer.pages) > 0:
+                    output_filepath = os.path.join(output_folder, f"{base_name}_part_{part_num}.pdf")
+                    with open(output_filepath, "wb") as output_file:
+                        current_writer.write(output_file)
+
+                messagebox.showinfo("Sadalīšana pabeigta", f"PDF sadalīts {part_num} daļās pēc atslēgvārdiem.")
+
+        except Exception as e:
+            messagebox.showerror("Kļūda sadalīšanā", f"Neizdevās sadalīt PDF failu: {e}")
+
+    def show_auto_metadata_dialog(self):
+        """Parāda dialogu automātiskai metadatu pievienošanai/atjaunināšanai."""
+        dialog = Toplevel(self)
+        dialog.title("Automātiska metadatu pievienošana")
+        dialog.geometry("450x350")
+        dialog.transient(self)
+        dialog.grab_set()
+
+        ttk.Label(dialog, text="Pievienot/atjaunināt metadatus atlasītajiem PDF failiem.").pack(pady=10)
+
+        form_frame = ttk.Frame(dialog)
+        form_frame.pack(padx=10, pady=5, fill="x")
+        form_frame.columnconfigure(1, weight=1)
+
+        ttk.Label(form_frame, text="Virsraksts:").grid(row=0, column=0, sticky="w", pady=2)
+        self.meta_title_var = tk.StringVar()
+        ttk.Entry(form_frame, textvariable=self.meta_title_var).grid(row=0, column=1, sticky="ew", pady=2)
+
+        ttk.Label(form_frame, text="Autors:").grid(row=1, column=0, sticky="w", pady=2)
+        self.meta_author_var = tk.StringVar()
+        ttk.Entry(form_frame, textvariable=self.meta_author_var).grid(row=1, column=1, sticky="ew", pady=2)
+
+        ttk.Label(form_frame, text="Tēma:").grid(row=2, column=0, sticky="w", pady=2)
+        self.meta_subject_var = tk.StringVar()
+        ttk.Entry(form_frame, textvariable=self.meta_subject_var).grid(row=2, column=1, sticky="ew", pady=2)
+
+        ttk.Label(form_frame, text="Atslēgvārdi (komats):").grid(row=3, column=0, sticky="w", pady=2)
+        self.meta_keywords_var = tk.StringVar()
+        ttk.Entry(form_frame, textvariable=self.meta_keywords_var).grid(row=3, column=1, sticky="ew", pady=2)
+
+        ttk.Label(form_frame, text="Izveides datums (YYYY-MM-DD):").grid(row=4, column=0, sticky="w", pady=2)
+        self.meta_creation_date_var = tk.StringVar()
+        ttk.Entry(form_frame, textvariable=self.meta_creation_date_var).grid(row=4, column=1, sticky="ew", pady=2)
+
+        ttk.Button(dialog, text="Sākt metadatu pievienošanu", command=lambda: self.perform_auto_metadata(dialog)).pack(
+            pady=20)
+
+    def perform_auto_metadata(self, dialog):
+        """Veic automātisku metadatu pievienošanu/atjaunināšanu."""
+        dialog.destroy()
+        selected_indices = self.file_listbox.curselection()
+        if not selected_indices:
+            messagebox.showwarning("Nav atlasīts", "Lūdzu, atlasiet PDF failus, kam pievienot metadatus.")
+            return
+
+        metadata = {
+            "/Title": self.meta_title_var.get(),
+            "/Author": self.meta_author_var.get(),
+            "/Subject": self.meta_subject_var.get(),
+            "/Keywords": self.meta_keywords_var.get(),
+        }
+        creation_date_str = self.meta_creation_date_var.get()
+        if creation_date_str:
+            try:
+                # Pypdf prasa datumu formātā "D:YYYYMMDDHHMMSSZ00'00"
+                dt_obj = datetime.strptime(creation_date_str, "%Y-%m-%d")
+                metadata["/CreationDate"] = dt_obj.strftime("D:%Y%m%d%H%M%S+00'00'")
+            except ValueError:
+                messagebox.showwarning("Nederīgs datums",
+                                       "Izveides datums nav pareizā formātā (YYYY-MM-DD). Tas tiks ignorēts.")
+
+        updated_count = 0
+        for index in selected_indices:
+            item = self.images[index]
+            pdf_path = item.get("filepath")
+            if not pdf_path or not pdf_path.lower().endswith(".pdf"):
+                continue
+
+            try:
+                reader = pypdf.PdfReader(pdf_path)
+                writer = pypdf.PdfWriter()
+
+                for page in reader.pages:
+                    writer.add_page(page)
+
+                # Atjaunina esošos metadatus un pievieno jaunos
+                existing_metadata = reader.metadata
+                if existing_metadata:
+                    for key, value in existing_metadata.items():
+                        if key not in metadata:  # Saglabā esošos, ja nav jaunu vērtību
+                            metadata[key] = value
+
+                writer.add_metadata(metadata)
+
+                with open(pdf_path, "wb") as output_file:
+                    writer.write(output_file)
+                updated_count += 1
+            except Exception as e:
+                print(f"Kļūda atjauninot metadatus failam {pdf_path}: {e}")
+
+        messagebox.showinfo("Metadati atjaunināti", f"Metadati veiksmīgi atjaunināti {updated_count} failiem.")
+
+    def show_auto_classify_dialog(self):
+        """Parāda dialogu automātiskai dokumentu klasifikācijai un pārvietošanai."""
+        dialog = Toplevel(self)
+        dialog.title("Automātiska dokumentu klasifikācija")
+        dialog.geometry("500x400")
+        dialog.transient(self)
+        dialog.grab_set()
+
+        ttk.Label(dialog, text="Klasificēt atlasītos dokumentus, pamatojoties uz OCR tekstu, un pārvietot tos.").pack(
+            pady=10)
+
+        ttk.Label(dialog, text="Klasifikācijas noteikumi (Atslēgvārds:Mērķa_mape, katrs jaunā rindā):").pack(anchor="w",
+                                                                                                             padx=10)
+        self.classification_rules_text = tk.Text(dialog, height=8, width=50)
+        self.classification_rules_text.pack(padx=10, pady=5, fill="both", expand=True)
+        self.classification_rules_text.insert(tk.END,
+                                              "rēķins:Rēķini\nčeks:Čeki\nlīgums:Līgumi\nID karte:Personu_dokumenti")
+
+        ttk.Label(dialog, text="Noklusējuma mape (ja neatrod atbilstību):").pack(anchor="w", padx=10, pady=5)
+        self.default_classify_folder_var = tk.StringVar(value="Neklasificēti")
+        ttk.Entry(dialog, textvariable=self.default_classify_folder_var, width=50).pack(padx=10, fill="x")
+
+        ttk.Button(dialog, text="Sākt klasifikāciju", command=lambda: self.perform_auto_classify(dialog)).pack(pady=20)
+
+    def perform_auto_classify(self, dialog):
+        """Veic automātisku dokumentu klasifikāciju un pārvietošanu."""
+        dialog.destroy()
+        selected_indices = self.file_listbox.curselection()
+        if not selected_indices:
+            messagebox.showwarning("Nav atlasīts", "Lūdzu, atlasiet dokumentus, ko klasificēt.")
+            return
+
+        rules_text = self.classification_rules_text.get("1.0", tk.END).strip()
+        rules = {}
+        for line in rules_text.split('\n'):
+            if ":" in line:
+                keyword, folder = line.split(':', 1)
+                rules[keyword.strip().lower()] = folder.strip()
+
+        if not rules:
+            messagebox.showwarning("Nav noteikumu", "Lūdzu, ievadiet klasifikācijas noteikumus.")
+            return
+
+        default_folder_name = self.default_classify_folder_var.get()
+        if not default_folder_name:
+            default_folder_name = "Neklasificēti"
+
+        classified_count = 0
+        for index in selected_indices:
+            item = self.images[index]
+            filepath = item.get("filepath")
+            if not filepath or not os.path.exists(filepath):
+                continue
+
+            ocr_text = self.ocr_results[index].lower() if self.ocr_results[index] else ""
+
+            target_folder_name = default_folder_name
+            for keyword, folder_name in rules.items():
+                if keyword in ocr_text:
+                    target_folder_name = folder_name
+                    break  # Atrasts pirmais atbilstošais noteikums
+
+            try:
+                # Pārvieto failu fiziski
+                base_dir = os.path.dirname(filepath)
+                target_folder_path = os.path.join(base_dir, target_folder_name)
+                os.makedirs(target_folder_path, exist_ok=True)  # Izveido mapi, ja tā neeksistē
+
+                new_filepath = os.path.join(target_folder_path, os.path.basename(filepath))
+
+                # Pievienojam unikālu sufiksu, ja fails ar šādu nosaukumu jau eksistē
+                counter = 1
+                temp_filepath = new_filepath
+                while os.path.exists(temp_filepath) and temp_filepath != filepath:
+                    temp_filepath = os.path.join(target_folder_path,
+                                                 f"{os.path.splitext(os.path.basename(filepath))[0]}_{counter}{os.path.splitext(filepath)[1]}")
+                    counter += 1
+                new_filepath = temp_filepath
+
+                os.rename(filepath, new_filepath)
+
+                # Atjaunina iekšējo failu sistēmu (ja izmantojat)
+                # Šī daļa ir sarežģītāka, jo jāatrod fails koka struktūrā un jāpārvieto
+                # Vienkāršības labad, šis piemērs tikai pārvieto fizisko failu un atjaunina self.images
+                item["filepath"] = new_filepath
+                item["name"] = os.path.basename(new_filepath)
+                self.file_listbox.delete(index)
+                self.file_listbox.insert(index, item["name"])  # Atjaunina listbox ierakstu
+
+                classified_count += 1
+            except Exception as e:
+                print(f"Kļūda klasificējot/pārvietojot {filepath}: {e}")
+
+        self.refresh_file_listbox()  # Atsvaidzina failu sarakstu
+        messagebox.showinfo("Klasifikācija pabeigta",
+                            f"Veiksmīgi klasificēti un pārvietoti {classified_count} dokumenti.")
+
+    def browse_google_credentials(self):
+        """Atver failu dialogu Google Drive akreditācijas faila izvēlei."""
+        filepath = filedialog.askopenfilename(
+            title="Izvēlēties Google Drive akreditācijas failu (credentials.json)",
+            filetypes=[("JSON faili", "*.json"), ("Visi faili", "*.*")]
+        )
+        if filepath:
+            self.google_drive_credentials_path.set(filepath)
+            messagebox.showinfo("Akreditācijas fails", f"Akreditācijas fails iestatīts uz: {filepath}")
+
+    def browse_google_token(self):
+        """Atver failu dialogu Google Drive token faila izvēlei."""
+        filepath = filedialog.askopenfilename(
+            title="Izvēlēties Google Drive token failu (token.json)",
+            filetypes=[("JSON faili", "*.json"), ("Visi faili", "*.*")]
+        )
+        if filepath:
+            self.google_drive_token_path.set(filepath)
+            messagebox.showinfo("Token fails", f"Token fails iestatīts uz: {filepath}")
+
+    def authorize_google_drive(self):
+        """Autorizējas Google Drive API."""
+        messagebox.showinfo("Autorizācija",
+                            "Šī funkcija vēl nav pilnībā implementēta. Jums būs jāpievieno Google Drive API integrācijas loģika.")
+        # Šeit būtu jāpievieno loģika, lai autorizētos Google Drive API, izmantojot credentials.json un saglabājot token.json
+        # Piemēram, izmantojot Google API klienta bibliotēku:
+        # from google.oauth2.credentials import Credentials
+        # from google_auth_oauthlib.flow import InstalledAppFlow
+        # from google.auth.transport.requests import Request
+        # import pickle
+        #
+        # SCOPES = ['https://www.googleapis.com/auth/drive.file']
+        # creds = None
+        # if os.path.exists(self.google_drive_token_path.get()):
+        #     with open(self.google_drive_token_path.get(), 'rb') as token:
+        #         creds = pickle.load(token)
+        # if not creds or not creds.valid:
+        #     if creds and creds.expired and creds.refresh_token:
+        #         creds.refresh(Request())
+        #     else:
+        #         flow = InstalledAppFlow.from_client_secrets_file(
+        #             self.google_drive_credentials_path.get(), SCOPES)
+        #         creds = flow.run_local_server(port=0)
+        #     with open(self.google_drive_token_path.get(), 'wb') as token:
+        #         pickle.dump(creds, token)
+        # messagebox.showinfo("Autorizācija", "Google Drive autorizācija veiksmīga!")
+
+    def update_remote_storage_fields(self, event=None):
+        """Atjaunina attālinātās glabāšanas lauku redzamību atkarībā no izvēlētā veida."""
+        selected_type = self.remote_storage_type.get()
+
+        if selected_type in ["FTP", "SFTP"]:
+            self.ftp_settings_frame.grid()
+            self.google_drive_settings_frame.grid_remove()
+        elif selected_type == "Google Drive":
+            self.ftp_settings_frame.grid_remove()
+            self.google_drive_settings_frame.grid()
+        else:  # Local
+            self.ftp_settings_frame.grid_remove()
+            self.google_drive_settings_frame.grid_remove()
+
+    def test_ftp_connection(self):
+        """Pārbauda FTP/SFTP savienojumu."""
+        host = self.ftp_host.get()
+        port = self.ftp_port.get()
+        user = self.ftp_user.get()
+        password = self.ftp_pass.get()
+        use_sftp = self.ftp_use_sftp.get()
+
+        if not host or not port or not user or not password:
+            messagebox.showwarning("Trūkst datu", "Lūdzu, aizpildiet visus FTP/SFTP laukus!")
+            return
+
+        try:
+            if use_sftp:
+                import paramiko
+                with paramiko.SSHClient() as client:
+                    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+                    client.connect(hostname=host, port=port, username=user, password=password, timeout=5)
+                    sftp_client = client.open_sftp()
+                    sftp_client.close()
+                messagebox.showinfo("Savienojums", "SFTP savienojums veiksmīgs!")
+            else:
+                from ftplib import FTP
+                with FTP() as ftp:
+                    ftp.connect(host, port, timeout=5)
+                    ftp.login(user, password)
+                    ftp.quit()
+                messagebox.showinfo("Savienojums", "FTP savienojums veiksmīgs!")
+        except Exception as e:
+            messagebox.showerror("Savienojuma kļūda", f"Neizdevās izveidot savienojumu:\n{e}")
+
+    def browse_scan_folder(self):
+        """Atver dialogu, lai izvēlētos skenēšanas mapi."""
+        folder_selected = filedialog.askdirectory(title="Izvēlēties mapi automātiskai skenēšanai")
+        if folder_selected:
+            self.scan_folder_path.set(folder_selected)
+            messagebox.showinfo("Skenēšanas mape", f"Skenēšanas mape iestatīta uz: {folder_selected}")
+
+    def toggle_auto_scan(self):
+        """Ieslēdz/izslēdz automātisko skenēšanu un Watchdog uzraudzību."""
         if self.auto_scan_enabled.get():
-            self.start_auto_scan()  # Sāk uzraudzību, ja bija ieslēgta
+            folder_to_watch = self.scan_folder_path.get()
+            if not os.path.isdir(folder_to_watch):
+                messagebox.showerror("Kļūda", "Norādītā skenēšanas mape neeksistē vai nav derīga.")
+                self.auto_scan_enabled.set(False)
+                return
+
+            self.event_handler = FileSystemEventHandler()
+            self.event_handler.on_created = self.on_new_file_in_scan_folder
+            self.observer = Observer()
+            self.observer.schedule(self.event_handler, folder_to_watch, recursive=False)
+            self.observer.start()
+            self.auto_scan_status_label.config(text=f"Statuss: Aktīvs, uzrauga '{folder_to_watch}'",
+                                               bootstyle="success")
+            messagebox.showinfo("Automātiskā skenēšana",
+                                f"Automātiskā skenēšana ieslēgta. Uzrauga mapi: {folder_to_watch}")
+        else:
+            if self.observer:
+                self.observer.stop()
+                self.observer.join()
+                self.observer = None
+            self.auto_scan_status_label.config(text="Statuss: Izslēgts", bootstyle="info")
+            messagebox.showinfo("Automātiskā skenēšana", "Automātiskā skenēšana izslēgta.")
+
+    def on_new_file_in_scan_folder(self, event):
+        """Apstrādā jaunu failu parādīšanos skenēšanas mapē."""
+        if event.is_directory:
+            return
+        filepath = event.src_path
+        print(f"Jauns fails atrasts skenēšanas mapē: {filepath}")
+        # Šeit varat pievienot loģiku, lai automātiski apstrādātu jauno failu, piemēram, pievienotu to OCR sarakstam
+        # self.after(100, lambda: self.open_files(filepath)) # Var izsaukt open_files, lai pievienotu sarakstam
+        # Vai arī automātiski veikt OCR un augšupielādi
+        # self.process_and_upload_file(filepath)
+        messagebox.showinfo("Jauns fails", f"Jauns fails atrasts skenēšanas mapē: {os.path.basename(filepath)}")
 
     def generate_qr_code(self):
         """Ģenerē QR kodu no ievadītā teksta un parāda to."""
@@ -2189,69 +7211,196 @@ class OCRPDFApp(ttk.Window):
         self._open_calendar(self.end_date_var)
 
     def _open_calendar(self, date_var):
-        """Atver kalendāra logu un iestata izvēlēto datumu."""
+        """Vienkāršs vizuāls kalendārs datuma izvēlei bez ārējām bibliotēkām."""
 
-        def set_date():
-            date_var.set(cal.selection_get().strftime("%Y-%m-%d"))
-            top.destroy()
-            self.filter_pdf_list()  # Pēc datuma izvēles uzreiz filtrē
+        class SimpleCalendar(tk.Toplevel):
+            def __init__(self, parent, date_var):
+                super().__init__(parent)
+                self.title("Izvēlēties datumu")
+                self.resizable(False, False)
+                self.date_var = date_var
+                self.parent = parent
 
-        top = Toplevel(self)
-        top.title("Izvēlēties datumu")
-        top.transient(self)
-        top.grab_set()
+                # Pašreizējais gads un mēnesis (var ielādēt no date_var, ja vēlaties)
+                try:
+                    dt = datetime.strptime(self.date_var.get(), "%Y-%m-%d")
+                    self.year = dt.year
+                    self.month = dt.month
+                except Exception:
+                    now = datetime.now()
+                    self.year = now.year
+                    self.month = now.month
 
-        # Izmanto tkcalendar.Calendar tieši, lai izvairītos no ttkbootstrap savietojamības problēmām
-        # Vai arī nodrošina, ka Calendar tiek inicializēts ar pareizo stilu
-        cal = Calendar(top, selectmode='day', date_pattern='yyyy-mm-dd',
-                       font="TkDefaultFont", background="#222222",
-                       normalbackground="#222222", foreground="white",
-                       normalforeground="white", headersbackground="#333333",
-                       headersforeground="white", selectbackground="#007bff",
-                       selectforeground="white", bordercolor="#333333",
-                       othermonthforeground="#666666", othermonthbackground="#1a1a1a",
-                       othermonthweforeground="#999999", othermonthwebackground="#1a1a1a",
-                       weekendbackground="#2a2a2a", weekendforeground="white",
-                       tooltipbackground="#444444", tooltipforeground="white")
-        cal.pack(padx=10, pady=10)
+                self.selected_day = None
 
-        ttk.Button(top, text="Apstiprināt", command=set_date).pack(pady=5)
-        top.update_idletasks()  # Atjaunina loga izmērus
-        top.geometry(
-            f"+{self.winfo_x() + self.winfo_width() // 2 - top.winfo_width() // 2}+{self.winfo_y() + self.winfo_height() // 2 - top.winfo_height() // 2}")
+                self._setup_widgets()
+                self._populate_days()
+
+                # Centrējam logu virs vecāka
+                self.update_idletasks()
+                x = self.parent.winfo_x() + (self.parent.winfo_width() // 2) - (self.winfo_width() // 2)
+                y = self.parent.winfo_y() + (self.parent.winfo_height() // 2) - (self.winfo_height() // 2)
+                self.geometry(f"+{x}+{y}")
+
+                self.grab_set()
+                self.focus_set()
+
+            def _setup_widgets(self):
+                # Augšējā josla ar mēneša un gada izvēli un pogām
+                nav_frame = ttk.Frame(self)
+                nav_frame.pack(padx=10, pady=5)
+
+                self.prev_btn = ttk.Button(nav_frame, text="<", width=3, command=self._prev_month)
+                self.prev_btn.grid(row=0, column=0)
+
+                self.month_year_lbl = ttk.Label(nav_frame, text="", width=15, anchor="center")
+                self.month_year_lbl.grid(row=0, column=1, columnspan=5)
+
+                self.next_btn = ttk.Button(nav_frame, text=">", width=3, command=self._next_month)
+                self.next_btn.grid(row=0, column=6)
+
+                # Dienu nosaukumi
+                days_frame = ttk.Frame(self)
+                days_frame.pack(padx=10)
+
+                self.day_labels = []
+                for i, day_name in enumerate(["P", "O", "T", "C", "P", "S", "S"]):  # Pirmdiena līdz Svētdiena latviski
+                    lbl = ttk.Label(days_frame, text=day_name, width=3, anchor="center", font=("Arial", 10, "bold"))
+                    lbl.grid(row=0, column=i)
+                    self.day_labels.append(lbl)
+
+                # Rāmītis ar dienu pogām
+                self.days_frame = ttk.Frame(self)
+                self.days_frame.pack(padx=10, pady=5)
+
+                self.day_buttons = []
+
+                # Apakšā apstiprināšanas poga
+                btn_frame = ttk.Frame(self)
+                btn_frame.pack(pady=5)
+                ok_btn = ttk.Button(btn_frame, text="Apstiprināt", command=self._on_ok, bootstyle="success")
+                ok_btn.pack()
+
+            def _populate_days(self):
+                # Notīra iepriekšējās pogas
+                for btn in self.day_buttons:
+                    btn.destroy()
+                self.day_buttons.clear()
+
+                # Atjaunina mēneša un gada nosaukumu
+                month_name = calendar.month_name[self.month]
+                self.month_year_lbl.config(text=f"{month_name} {self.year}")
+
+                # Iegūst pirmās dienas nedēļas dienu un dienu skaitu mēnesī
+                cal = calendar.Calendar(firstweekday=0)  # Pirmdiena = 0
+                month_days = list(cal.itermonthdays2(self.year, self.month))  # (diena, nedēļas diena)
+
+                # Rindas un kolonnas izveide
+                row = 0
+                col = 0
+
+                for day, weekday in month_days:
+                    if day == 0:
+                        # Dienas no iepriekšējā vai nākamā mēneša - tukšas vietas
+                        lbl = ttk.Label(self.days_frame, text="", width=3)
+                        lbl.grid(row=row, column=col)
+                    else:
+                        btn = ttk.Button(self.days_frame, text=str(day), width=3)
+                        btn.grid(row=row, column=col, padx=1, pady=1)
+                        btn.config(command=lambda d=day: self._on_day_selected(d))
+                        self.day_buttons.append(btn)
+
+                        # Ja šī diena ir atlasīta, izceļam
+                        if (self.selected_day == day):
+                            btn.state(["pressed"])
+                        else:
+                            btn.state(["!pressed"])
+
+                    col += 1
+                    if col > 6:
+                        col = 0
+                        row += 1
+
+            def _on_day_selected(self, day):
+                self.selected_day = day
+                # Atjaunojam pogu stāvokli, lai izceltu atlasīto dienu
+                for btn in self.day_buttons:
+                    btn.state(["!pressed"])
+                    if btn["text"] == str(day):
+                        btn.state(["pressed"])
+
+            def _prev_month(self):
+                if self.month == 1:
+                    self.month = 12
+                    self.year -= 1
+                else:
+                    self.month -= 1
+                self.selected_day = None
+                self._populate_days()
+
+            def _next_month(self):
+                if self.month == 12:
+                    self.month = 1
+                    self.year += 1
+                else:
+                    self.month += 1
+                self.selected_day = None
+                self._populate_days()
+
+            def _on_ok(self):
+                if self.selected_day is None:
+                    tk.messagebox.showwarning("Brīdinājums", "Lūdzu, izvēlieties datumu!")
+                    return
+                # Uzstāda datumu mainīgajā
+                date_str = f"{self.year}-{self.month:02d}-{self.selected_day:02d}"
+                self.date_var.set(date_str)
+                self.destroy()
+                self.parent.filter_pdf_list()
+
+        # Izsaucam kalendāra logu
+        SimpleCalendar(self, date_var)
 
     def filter_pdf_list(self, event=None):
-        """Filtrē PDF sarakstu, pamatojoties uz meklēšanas terminu un datumu diapazonu."""
+        """Filtrē PDF sarakstu, pamatojoties uz meklēšanas terminu un datumu diapazonu, un iekrāso atbilstošos vārdus."""
         search_term = self.search_var.get().lower()
         start_date_str = self.start_date_var.get()
         end_date_str = self.end_date_var.get()
 
-        # Filtrē pašreizējās mapes saturu
+        self.pdf_listbox.config(state=tk.NORMAL)  # Atļaujam rediģēt
+        self.pdf_listbox.delete("1.0", tk.END)  # Notīrām visu tekstu
+        self.pdf_listbox.tag_remove("highlight", "1.0", tk.END)  # Notīrām iepriekšējos iekrāsojumus
+        self.pdf_listbox.tag_remove("selected_line", "1.0", tk.END)  # Notīrām atlasi
+
         filtered_contents = []
         for item in self.current_folder["contents"]:
             match_search = True
             match_date = True
 
             # Meklēšana
-            if search_term:
-                if item["type"] == "file":
-                    if search_term not in item['filepath'].lower() and search_term not in item[
-                        'doc_id'].lower() and search_term not in item['name'].lower():
+            item_text_content = ""
+            if item["type"] == "file":
+                item_text_content = f"📄 {item['name']} ({item['date']})".lower()
+                if search_term:
+                    if search_term not in item_text_content and \
+                            search_term not in item['filepath'].lower() and \
+                            search_term not in item['doc_id'].lower():
                         match_search = False
-                elif item["type"] == "folder":
-                    if search_term not in item['name'].lower():
+            elif item["type"] == "folder":
+                item_text_content = f"📁 {item['name']}".lower()
+                if search_term:
+                    if search_term not in item_text_content:
                         match_search = False
 
             # Datuma filtrēšana (tikai failiem)
             if item["type"] == "file" and (start_date_str or end_date_str):
                 try:
-                    entry_date = datetime.datetime.strptime(item['date'].split(" ")[0], "%Y-%m-%d").date()
+                    entry_date = datetime.strptime(item['date'].split(" ")[0], "%Y-%m-%d").date()
                     if start_date_str:
-                        start_date = datetime.datetime.strptime(start_date_str, "%Y-%m-%d").date()
+                        start_date = datetime.strptime(start_date_str, "%Y-%m-%d").date()
                         if entry_date < start_date:
                             match_date = False
                     if end_date_str:
-                        end_date = datetime.datetime.strptime(end_date_str, "%Y-%m-%d").date()
+                        end_date = datetime.strptime(end_date_str, "%Y-%m-%d").date()
                         if entry_date > end_date:
                             match_date = False
                 except ValueError:
@@ -2260,12 +7409,71 @@ class OCRPDFApp(ttk.Window):
             if match_search and match_date:
                 filtered_contents.append(item)
 
-        self.pdf_listbox.delete(0, tk.END)
-        for item in filtered_contents:
+        # Šķirojam filtrēto saturu: vispirms mapes, tad faili, pēc tam alfabētiski
+        # Šeit arī saglabājam oriģinālo failu prioritāti, ja tas ir sadalīts PDF mapē
+        sorted_filtered_contents = []
+        original_file_in_folder = None
+
+        # Pārbaudām, vai pašreizējā mape ir sadalīta PDF mape un vai tajā ir oriģinālais fails
+        if self.current_folder.get("name", "").endswith("_pages"):
+            for item in filtered_contents:
+                # Oriģinālais fails ir tas, kura nosaukums nav ar "_page_XXX" sufiksu
+                if item["type"] == "file" and not "_page_" in item["name"]:
+                    original_file_in_folder = item
+                    break
+
+            if original_file_in_folder:
+                sorted_filtered_contents.append(original_file_in_folder)
+                # Pievienojam pārējās lapas, šķirojot tās pēc lapas numura
+                pages = sorted([
+                    item for item in filtered_contents
+                    if item["type"] == "file" and "_page_" in item["name"]
+                ], key=lambda x: x.get("original_page_number", float('inf')))
+                sorted_filtered_contents.extend(pages)
+
+                # Pievienojam mapes, ja tādas ir
+                folders = sorted([
+                    item for item in filtered_contents
+                    if item["type"] == "folder"
+                ], key=lambda x: x["name"].lower())
+                sorted_filtered_contents.extend(folders)
+            else:
+                # Ja nav oriģinālā faila vai nav sadalīta PDF mape, šķirojam kā parasti
+                sorted_filtered_contents = sorted(filtered_contents,
+                                                  key=lambda x: (0 if x["type"] == "folder" else 1, x["name"].lower()))
+        else:
+            # Ja nav sadalīta PDF mape, šķirojam kā parasti
+            sorted_filtered_contents = sorted(filtered_contents,
+                                              key=lambda x: (0 if x["type"] == "folder" else 1, x["name"].lower()))
+
+        self._displayed_items = []  # Atjaunojam parādīto vienumu sarakstu
+
+        for i, item in enumerate(sorted_filtered_contents):
+            display_text = ""
             if item["type"] == "file":
-                self.pdf_listbox.insert(tk.END, f"📄 {item['doc_id']} - {item['name']} ({item['date']})")
+                name_to_display = item.get("display_name", item['name'])
+                display_text = f"{i + 1}. 📄 {name_to_display} ({item['date']})"
             elif item["type"] == "folder":
-                self.pdf_listbox.insert(tk.END, f"📁 {item['name']}")
+                display_text = f"{i + 1}. 📁 {item['name']}"
+
+            start_index = self.pdf_listbox.index(tk.END)  # Iegūstam sākuma indeksu pirms ievietošanas
+            self.pdf_listbox.insert(tk.END, display_text + "\n", "normal")  # Ievietojam tekstu ar jaunu rindu
+            end_index = self.pdf_listbox.index(tk.END + "-1c")  # Iegūstam beigu indeksu pēc ievietošanas
+
+            # Iekrāsojam atbilstošos vārdus, ja ir meklēšanas termins
+            if search_term:
+                start_pos = "1.0"
+                while True:
+                    start_pos = self.pdf_listbox.search(search_term, start_pos, stopindex=end_index, nocase=1)
+                    if not start_pos:
+                        break
+                    end_pos = f"{start_pos}+{len(search_term)}c"
+                    self.pdf_listbox.tag_add("highlight", start_pos, end_pos)
+                    start_pos = end_pos
+
+            self._displayed_items.append(item)  # Pievienojam vienumu sarakstam
+
+        self.pdf_listbox.config(state=tk.DISABLED)  # Atkal atspējojam rediģēšanu
 
     def clear_pdf_filters(self):
         """Notīra visus PDF saraksta filtrus."""
@@ -2274,17 +7482,134 @@ class OCRPDFApp(ttk.Window):
         self.end_date_var.set("")
         self.refresh_pdf_list()
 
+    def sync_current_folder_with_disk(self):
+        """
+        Sinhronizē pašreizējo iekšējās failu sistēmas mapi ar tās fizisko atbilstību diskā.
+        Pievieno jaunus failus/mapes no diska un noņem tos, kas vairs neeksistē diskā.
+        """
+        current_physical_path = self._get_physical_path_from_node(self.current_folder)
+
+        if not os.path.exists(current_physical_path):
+            # Ja fiziskā mape vairs neeksistē, atgriežamies uz vecāku mapi
+            messagebox.showwarning("Mape nav atrasta",
+                                   f"Fiziskā mape '{current_physical_path}' vairs neeksistē. Atgriežamies uz iepriekšējo mapi.")
+            self.go_back_folder()
+            return
+
+        # 1. Izveido sarakstu ar esošajiem vienumiem iekšējā struktūrā
+        internal_items_map = {item["name"]: item for item in self.current_folder["contents"]}
+
+        # 2. Pārbauda fiziskos failus/mapes diskā
+        disk_items = set(os.listdir(current_physical_path))
+
+        # Noņem vienumus no iekšējās struktūras, kas vairs neeksistē diskā
+        items_to_remove_from_internal = []
+        for name, item in internal_items_map.items():
+            if name not in disk_items:
+                items_to_remove_from_internal.append(item)
+
+        for item_to_remove in items_to_remove_from_internal:
+            if item_to_remove in self.current_folder[
+                "contents"]:  # Pārbaude, lai izvairītos no kļūdām, ja vienums jau noņemts
+                self.current_folder["contents"].remove(item_to_remove)
+                print(f"Noņemts no iekšējās struktūras (neeksistē diskā): {item_to_remove['name']}")
+
+        # Pievieno jaunus failus/mapes no diska, kas nav iekšējā struktūrā
+        for name in disk_items:
+            if name not in internal_items_map:
+                item_path = os.path.join(current_physical_path, name)
+
+                if os.path.isfile(item_path):
+                    # Pievieno failu
+                    doc_id = str(uuid.uuid4())[:8]
+                    try:
+                        creation_time = datetime.fromtimestamp(os.path.getctime(item_path))
+                        date_str = creation_time.strftime("%Y-%m-%d %H:%M:%S")
+                    except:
+                        date_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+                    new_file = {
+                        "type": "file",
+                        "name": name,
+                        "filepath": item_path,
+                        "doc_id": doc_id,
+                        "date": date_str,
+                        "parent": self.current_folder
+                    }
+                    self.current_folder["contents"].append(new_file)
+                    print(f"Pievienots jauns fails no diska: {name}")
+
+                elif os.path.isdir(item_path):
+                    # Pievieno mapi
+                    new_folder = {
+                        "type": "folder",
+                        "name": name,
+                        "contents": [],  # Satura ielāde notiks, kad tiks navigēts uz šo mapi
+                        "parent": self.current_folder
+                    }
+                    self.current_folder["contents"].append(new_folder)
+                    print(f"Pievienota jauna mape no diska: {name}")
+
+        # Pēc sinhronizācijas saglabājam arhīvu
+        self.save_pdf_archive()
+
     def refresh_pdf_list(self):
-        """Atjaunina PDF sarakstu, parādot pašreizējās mapes saturu."""
-        self.pdf_listbox.delete(0, tk.END)
-        for item in self.current_folder["contents"]:
+        """Atjaunina PDF sarakstu, parādot pašreizējās mapes saturu un sinhronizējot ar fizisko disku."""
+        self.sync_current_folder_with_disk()
+        self.pdf_listbox.config(state=tk.NORMAL)  # Atļaujam rediģēt, lai varētu ievietot tekstu
+        self.pdf_listbox.delete("1.0", tk.END)  # Dzēšam visu tekstu
+
+        if not hasattr(self, 'current_folder') or "contents" not in self.current_folder:
+            print("Kļūda: current_folder nav pareizi inicializēts vai tam trūkst 'contents'.")
+            self.pdf_listbox.config(state=tk.DISABLED)  # Atkal atspējojam rediģēšanu
+            return
+
+        # Šķirojam saturu: vispirms mapes, tad faili, pēc tam alfabētiski
+        # Jaunizveidotajā mapē (pēc split_pdf_to_pages) oriģinālais fails jau būs pirmais
+        # un lapas sekos, tāpēc šeit papildu šķirošana nav nepieciešama, ja vienumi jau ir pareizā secībā.
+        # Ja vēlaties stingri nodrošināt oriģinālā faila prioritāti, varat to darīt šeit.
+        # Piemēram, atdalīt oriģinālo failu, šķirot pārējos un tad salikt kopā.
+        # Šobrīd pieņemam, ka `split_pdf_to_pages` jau sakārtoja `new_folder_node["contents"]`.
+        sorted_contents = self.current_folder["contents"]  # Vairs nav nepieciešama papildu šķirošana šeit
+
+        # Saglabājam sarakstu ar rādāmajiem vienumiem, lai varētu tos identificēt vēlāk
+        self._displayed_items = []
+
+        for i, item in enumerate(sorted_contents):
+            display_text = ""
             if item["type"] == "file":
-                self.pdf_listbox.insert(tk.END, f"📄 {item['doc_id']} - {item['name']} ({item['date']})")
+                # Pārbaudām, vai ir "display_name" (lapām) vai izmantojam "name"
+                name_to_display = item.get("display_name", item['name'])
+                display_text = f"{i + 1}. 📄 {name_to_display} ({item['date']})\n"
             elif item["type"] == "folder":
-                self.pdf_listbox.insert(tk.END, f"📁 {item['name']}")
+                display_text = f"{i + 1}. 📁 {item['name']}\n"
+
+            self.pdf_listbox.insert(tk.END, display_text, "normal")  # Ievietojam tekstu ar noklusējuma tagu
+            self._displayed_items.append(item)  # Pievienojam vienumu sarakstam
+
+        self.pdf_listbox.config(state=tk.DISABLED)  # Atkal atspējojam rediģēšanu
         self.update_path_label()
         self.update_back_button_state()
         self.save_pdf_archive()  # Saglabā izmaiņas failu sistēmā
+
+        # Pēc atsvaidzināšanas pielietojam filtrus, ja tādi ir
+        self.filter_pdf_list()
+
+    def on_text_double_click(self, event):
+        """Apstrādā dubultklikšķi uz tk.Text logrīka, lai atvērtu vienumu."""
+        # Izmanto iepriekš saglabāto atlases indeksu
+        if hasattr(self, '_selected_line_index') and self._selected_line_index != -1:
+            line_number = self._selected_line_index
+            if 0 <= line_number < len(self._displayed_items):
+                selected_item = self._displayed_items[line_number]
+                self.open_selected_item(selected_item)
+        else:
+            # Ja nav iepriekšējas atlases, mēģina iegūt no klikšķa pozīcijas
+            index = self.pdf_listbox.index(f"@{event.x},{event.y}")
+            line_number = int(index.split(".")[0]) - 1  # Rindas numurs (0-bāzēts)
+            if 0 <= line_number < len(self._displayed_items):
+                selected_item = self._displayed_items[line_number]
+                self.open_selected_item(selected_item)
 
     def update_path_label(self):
         """Atjaunina ceļa etiķeti, lai parādītu pašreizējo mapes ceļu."""
@@ -2309,16 +7634,25 @@ class OCRPDFApp(ttk.Window):
             self.current_folder = self.current_folder["parent"]
             self.refresh_pdf_list()
 
-    def open_selected_item(self, event=None):
-        """Atver atlasīto vienumu (failu vai mapi)."""
-        selection = self.pdf_listbox.curselection()
-        if not selection:
-            messagebox.showwarning("Nav atlasīts", "Lūdzu, atlasiet vienumu no saraksta.")
-            return
+    def open_selected_item(self, item_to_open=None):
+        """
+        Atver atlasīto vienumu (failu vai mapi).
+        Ja item_to_open ir None, tad ņem no iepriekš saglabātās atlases.
+        """
+        selected_item = None
+        if item_to_open is None:
+            if hasattr(self, '_selected_line_index') and self._selected_line_index != -1:
+                line_number = self._selected_line_index
+                if 0 <= line_number < len(self._displayed_items):
+                    selected_item = self._displayed_items[line_number]
 
-        index = selection[0]
-        selected_item = self.current_folder["contents"][index]
+            if selected_item is None:
+                messagebox.showwarning("Nav atlasīts", "Lūdzu, atlasiet vienumu no saraksta.")
+                return
+        else:
+            selected_item = item_to_open  # Izmantojam padoto vienumu
 
+        # Šis ir galvenais loģikas bloks, kas nosaka, vai atvērt failu vai navigēt uz mapi
         if selected_item["type"] == "file":
             filepath = selected_item['filepath']
             if os.path.exists(filepath):
@@ -2330,12 +7664,46 @@ class OCRPDFApp(ttk.Window):
                 messagebox.showwarning("Fails nav atrasts",
                                        "Fails nav atrasts norādītajā vietā. Iespējams, tas ir pārvietots vai dzēsts.")
         elif selected_item["type"] == "folder":
+            # JA IR MAPE, TAD NAVIGĒ UZ TO PROGRAMMĀ
             self.current_folder = selected_item
             self.refresh_pdf_list()
+            print(f"Navigēts uz mapi: {selected_item.get('name', 'Nezināma mape')}")
+        else:
+            messagebox.showwarning("Kļūda", "Nezināms vienuma tips.")
 
     def on_pdf_select(self, event=None):
-        """Apstrādā PDF faila atlasi sarakstā (pašlaik nedara neko)."""
-        pass
+        """Apstrādā PDF faila atlasi tk.Text logrīkā, ielādējot priekšskatījumu."""
+        # Notīrām iepriekšējo atlasi, ja tāda bija
+        self.pdf_listbox.tag_remove("sel", "1.0", tk.END)
+
+        try:
+            # Iegūstam pašreizējo atlasi
+            selection_start = self.pdf_listbox.index(tk.SEL_FIRST)
+            selection_end = self.pdf_listbox.index(tk.SEL_LAST)
+
+            # Iegūstam atlasītās rindas numuru
+            line_number = int(selection_start.split(".")[0]) - 1
+
+            if 0 <= line_number < len(self._displayed_items):
+                selected_item = self._displayed_items[line_number]
+
+                # Pielietojam "sel" tagu atlasītajai rindai
+                self.pdf_listbox.tag_add("sel", f"{line_number + 1}.0", f"{line_number + 1}.end")
+
+                if selected_item["type"] == "file" and selected_item["name"].lower().endswith(".pdf"):
+                    filepath = selected_item['filepath']
+                    if os.path.exists(filepath):
+                        self._load_pdf_for_preview(filepath)
+                    else:
+                        messagebox.showwarning("Fails nav atrasts", "Atlasītais PDF fails nav atrasts diskā.")
+                        self._clear_pdf_preview()
+                else:
+                    self._clear_pdf_preview()  # Notīra priekšskatījumu, ja atlasīts nav PDF fails
+            else:
+                self._clear_pdf_preview()  # Notīra priekšskatījumu, ja nekas nav atlasīts vai atlase ir ārpus robežām
+        except tk.TclError:
+            # Nav aktīvas atlases, vai atlase ir tukša
+            self._clear_pdf_preview()
 
     def open_pdf_location(self):
         """Atver mapes atrašanās vietu, kurā atrodas atlasītais PDF fails (sistēmā)."""
@@ -2347,8 +7715,8 @@ class OCRPDFApp(ttk.Window):
         index = selection[0]
         selected_item = self.current_folder["contents"][index]
 
-        if selected_item["type"] == "file":
-            filepath = selected_item['filepath']
+        if selected_item['type'] == 'file':
+            self.open_pdf_file_by_path(selected_item['filepath'])
             if os.path.exists(filepath):
                 try:
                     # Atver mapi un iezīmē failu
@@ -2368,40 +7736,65 @@ class OCRPDFApp(ttk.Window):
             messagebox.showwarning("Nav fails", "Atlasītais vienums nav fails.")
 
     def delete_selected_item(self):
-        """Dzēš atlasītos vienumus (failus vai mapes) no iekšējās failu sistēmas."""
-        selection = self.pdf_listbox.curselection()
-        if not selection:
+        """Dzēš atlasītos vienumus (failus vai mapes) no iekšējās failu sistēmas un fiziski no diska."""
+        # Izmanto iepriekš saglabāto atlases indeksu
+        if not hasattr(self, '_selected_line_index') or self._selected_line_index == -1:
             messagebox.showwarning("Nav atlasīts", "Lūdzu, atlasiet vienumu(s), ko dzēst.")
             return
 
-        selected_indices = sorted(list(selection), reverse=True)
-        items_to_delete = [self.current_folder["contents"][i] for i in selected_indices]
+        line_number = self._selected_line_index
 
-        confirm_msg = f"Vai tiešām vēlaties dzēst {len(items_to_delete)} atlasītos vienumus?\n"
-        confirm_msg += "Ņemiet vērā, ka faili tiks dzēsti arī no diska!"
+        if not (0 <= line_number < len(self._displayed_items)):
+            messagebox.showwarning("Nav atlasīts", "Nederīga atlase.")
+            return
 
-        if messagebox.askyesno("Dzēst vienumus", confirm_msg):
-            for index in selected_indices:
-                item = self.current_folder["contents"][index]
-                if item["type"] == "file":
-                    try:
-                        if os.path.exists(item["filepath"]):
-                            os.remove(item["filepath"])
-                        # Noņem no saraksta tikai pēc veiksmīgas dzēšanas no diska
-                        self.current_folder["contents"].pop(index)
-                    except Exception as e:
-                        messagebox.showerror("Kļūda", f"Neizdevās dzēst failu {item['name']}:\n{e}")
-                elif item["type"] == "folder":
-                    # Rekursīvi dzēš mapes saturu no diska
-                    if self._delete_folder_contents_from_disk(item):
-                        # Noņem no saraksta tikai pēc veiksmīgas dzēšanas no diska
-                        self.current_folder["contents"].pop(index)
-                    else:
-                        messagebox.showwarning("Dzēšanas kļūda",
-                                               f"Neizdevās pilnībā dzēst mapi {item['name']} no diska.")
+        item_to_delete = self._displayed_items[line_number]
+        physical_path = self._get_physical_path_from_node(item_to_delete)
 
+        confirm_msg = f"Vai tiešām vēlaties dzēst '{item_to_delete['name']}'?\n"
+        confirm_msg += "Šī darbība neatgriezeniski dzēsīs failu/mapi arī no diska!"
+
+        if not messagebox.askyesno("Dzēst vienumu", confirm_msg):
+            return
+
+        deleted_successfully = False
+        if item_to_delete["type"] == "file":
+            try:
+                if os.path.exists(physical_path):
+                    os.remove(physical_path)
+                    print(f"Fiziski dzēsts fails: {physical_path}")
+                else:
+                    print(f"Fails neeksistē fiziski, dzēš tikai no programmas: {physical_path}")
+                # Noņemam vienumu no current_folder["contents"]
+                if item_to_delete in self.current_folder["contents"]:
+                    self.current_folder["contents"].remove(item_to_delete)
+                deleted_successfully = True
+            except OSError as e:
+                messagebox.showerror("Dzēšanas kļūda", f"Neizdevās dzēst failu {item_to_delete['name']}:\n{e}")
+            except Exception as e:
+                messagebox.showerror("Kļūda", f"Neparedzēta kļūda dzēšot failu {item_to_delete['name']}:\n{e}")
+        elif item_to_delete["type"] == "folder":
+            try:
+                if os.path.exists(physical_path):
+                    import shutil
+                    shutil.rmtree(physical_path)
+                    print(f"Fiziski dzēsta mape: {physical_path}")
+                else:
+                    print(f"Mape neeksistē fiziski, dzēš tikai no programmas: {physical_path}")
+                # Noņemam vienumu no current_folder["contents"]
+                if item_to_delete in self.current_folder["contents"]:
+                    self.current_folder["contents"].remove(item_to_delete)
+                deleted_successfully = True
+            except OSError as e:
+                messagebox.showerror("Dzēšanas kļūda", f"Neizdevās dzēst mapi {item_to_delete['name']}:\n{e}")
+            except Exception as e:
+                messagebox.showerror("Kļūda", f"Neparedzēta kļūda dzēšot mapi {item_to_delete['name']}:\n{e}")
+
+        if deleted_successfully:
             self.refresh_pdf_list()
-            messagebox.showinfo("Dzēsts", "Atlasītie vienumi veiksmīgi dzēsti.")
+            messagebox.showinfo("Dzēsts", f"Vienums '{item_to_delete['name']}' veiksmīgi dzēsts.")
+        else:
+            messagebox.showinfo("Dzēšana", "Vienums netika dzēsts.")
 
     def _delete_folder_contents_from_disk(self, folder_node):
         """Rekursīvi dzēš mapes saturu no diska."""
@@ -2428,26 +7821,32 @@ class OCRPDFApp(ttk.Window):
             success = False
         return success
 
-
     def send_selected_pdfs_by_email(self):
         """Nosūta atlasītos PDF failus, izmantojot SMTP iestatījumus."""
-        selection = self.pdf_listbox.curselection()
-        if not selection:
+        # Iegūstam atlasītās rindas numuru
+        try:
+            selection_start = self.pdf_listbox.index(tk.SEL_FIRST)
+            line_number = int(selection_start.split(".")[0]) - 1
+        except tk.TclError:
             messagebox.showwarning("Nav atlasīts", "Lūdzu, atlasiet PDF failu(s), ko nosūtīt e-pastā.")
             return
 
+        if not (0 <= line_number < len(self._displayed_items)):
+            messagebox.showwarning("Nav atlasīts", "Nederīga atlase.")
+            return
+
+        selected_item = self._displayed_items[line_number]
+
         selected_filepaths = []
-        for index in selection:
-            item = self.current_folder["contents"][index]
-            if item["type"] == "file":
-                filepath = item['filepath']
-                if os.path.exists(filepath):
-                    selected_filepaths.append(filepath)
-                else:
-                    messagebox.showwarning("Fails nav atrasts",
-                                           f"Fails '{os.path.basename(filepath)}' nav atrasts un netiks pievienots.")
+        if selected_item["type"] == "file":
+            filepath = selected_item['filepath']
+            if os.path.exists(filepath):
+                selected_filepaths.append(filepath)
             else:
-                messagebox.showwarning("Nav fails", f"Vienums '{item['name']}' nav fails un netiks pievienots.")
+                messagebox.showwarning("Fails nav atrasts",
+                                       f"Fails '{os.path.basename(filepath)}' nav atrasts un netiks pievienots.")
+        else:
+            messagebox.showwarning("Nav fails", f"Vienums '{selected_item['name']}' nav fails un netiks pievienots.")
 
         if not selected_filepaths:
             messagebox.showwarning("Nav failu", "Neviens derīgs fails nav atlasīts sūtīšanai.")
@@ -2476,7 +7875,6 @@ class OCRPDFApp(ttk.Window):
 
         ttk.Button(to_email_dialog, text="Nosūtīt", command=confirm_send, bootstyle=PRIMARY).pack(pady=10)
         ttk.Button(to_email_dialog, text="Atcelt", command=to_email_dialog.destroy, bootstyle=SECONDARY).pack(pady=5)
-
     def on_select(event):
         global selected_item  # Padara mainīgo globālu
         selection = event.widget.curselection()
@@ -2547,16 +7945,30 @@ class OCRPDFApp(ttk.Window):
         """Parāda konteksta izvēlni PDF saraksta elementiem."""
         try:
             # Pārliecināmies, ka tiek atlasīts elements, uz kura uzklikšķināts
-            self.pdf_listbox.selection_clear(0, tk.END)
-            index = self.pdf_listbox.nearest(event.y)
-            self.pdf_listbox.selection_set(index)
-            self.pdf_listbox.activate(index)
+            # Iegūst klikšķa pozīciju rindas formātā (1-bāzēts)
+            index = self.pdf_listbox.index(f"@{event.x},{event.y}")
+            line_number = int(index.split(".")[0]) - 1  # 0-bāzēts rindas numurs
+
+            # Noņem iepriekšējo atlasi
+            self.pdf_listbox.tag_remove("selected_line", "1.0", tk.END)
+            self.pdf_listbox.tag_remove("sel", "1.0", tk.END)
+
+            # Pievieno atlasi atlasītajai rindai
+            start_index = f"{line_number + 1}.0"
+            end_index = f"{line_number + 1}.end"
+            self.pdf_listbox.tag_add("selected_line", start_index, end_index)
+
+            # Saglabā atlasīto indeksu
+            self._selected_line_index = line_number
 
             # Iegūst atlasīto vienumu
-            selected_item = self.current_folder["contents"][index]
+            if 0 <= line_number < len(self._displayed_items):
+                selected_item = self._displayed_items[line_number]
+            else:
+                selected_item = None
 
             context_menu = tk.Menu(self.pdf_listbox, tearoff=0)
-            context_menu.add_command(label="Atvērt", command=lambda: self.open_selected_item())
+            context_menu.add_command(label="Atvērt", command=lambda: self.open_pdf_file_by_path(selected_item['filepath']))
             context_menu.add_command(label="Atvērt mapē (sistēmā)", command=lambda: self.open_pdf_location())
             context_menu.add_command(label="Nosūtīt e-pastā", command=lambda: self.send_selected_pdfs_by_email())
             context_menu.add_separator()
@@ -2570,90 +7982,131 @@ class OCRPDFApp(ttk.Window):
                                      command=lambda: self.remove_password_from_pdf(selected_item['filepath']))
             context_menu.add_command(label="Mainīt paroli",
                                      command=lambda: self.change_password_of_pdf(selected_item['filepath']))
+            context_menu.add_separator()
+            context_menu.add_command(label="Sadalīt PDF pa lapām",
+                                     command=lambda: self.split_pdf_to_pages(selected_item['filepath']) if selected_item.get('type') == 'file' else None)
 
             context_menu.post(event.x_root, event.y_root)
         except Exception:
             pass  # Ja nav atlasīts nekas, ignorē
 
     def create_new_folder_internal(self):
-        """Izveido jaunu mapi iekšējā failu sistēmā."""
+        """Izveido jaunu mapi iekšējā failu sistēmā un fiziski diskā."""
         new_folder_name = simpledialog.askstring("Jauna mape", "Ievadiet jaunās mapes nosaukumu:", parent=self)
-        if new_folder_name:
-            # Pārbauda, vai mape ar šādu nosaukumu jau eksistē
-            for item in self.current_folder["contents"]:
-                if item["type"] == "folder" and item["name"] == new_folder_name:
-                    messagebox.showwarning("Mape jau eksistē",
-                                           f"Mape ar nosaukumu '{new_folder_name}' jau eksistē šajā mapē.")
-                    return
+        if not new_folder_name:
+            return
 
+        # Pārbauda, vai mape ar šādu nosaukumu jau eksistē iekšējā struktūrā
+        for item in self.current_folder["contents"]:
+            if item["type"] == "folder" and item["name"] == new_folder_name:
+                messagebox.showwarning("Mape jau eksistē",
+                                       f"Mape ar nosaukumu '{new_folder_name}' jau eksistē šajā mapē.")
+                return
+
+        # Izveido fizisko ceļu jaunajai mapei
+        current_physical_path = self._get_physical_path_from_node(self.current_folder)
+        new_physical_folder_path = os.path.join(current_physical_path, new_folder_name)
+
+        try:
+            # Izveido fizisko mapi
+            os.makedirs(new_physical_folder_path, exist_ok=True)
+            print(f"Fiziski izveidota mape: {new_physical_folder_path}")
+
+            # Ja fiziskā mape izveidota veiksmīgi, pievieno to iekšējai struktūrai
             new_folder = {"type": "folder", "name": new_folder_name, "contents": [], "parent": self.current_folder}
             self.current_folder["contents"].append(new_folder)
             self.refresh_pdf_list()
             messagebox.showinfo("Mape izveidota", f"Mape '{new_folder_name}' veiksmīgi izveidota.")
+        except OSError as e:
+            messagebox.showerror("Mapes izveides kļūda", f"Neizdevās izveidot mapi '{new_folder_name}':\n{e}")
+        except Exception as e:
+            messagebox.showerror("Kļūda", f"Neparedzēta kļūda veidojot mapi '{new_folder_name}':\n{e}")
 
     def move_selected_items(self):
-        """Pārvieto atlasītos vienumus uz citu mapi iekšējā failu sistēmā."""
-        selection = self.pdf_listbox.curselection()
-        if not selection:
-            messagebox.showwarning("Nav atlasīts", "Lūdzu, atlasiet vienumu(s), ko pārvietot.")
+        index = getattr(self, '_selected_line_index', -1)
+        if index == -1:
+            messagebox.showwarning("Nav atlasīts", "Lūdzu, atlasiet vienumus.")
             return
 
         # Izveido mapju izvēles dialogu
         target_folder = self._select_folder_dialog(self.internal_file_system)
 
-        if target_folder:
-            moved_count = 0
-            # Jāveido kopija, jo saraksts mainīsies dzēšot elementus
-            items_to_move = [self.current_folder["contents"][i] for i in sorted(list(selection), reverse=True)]
+        if not target_folder:
+            messagebox.showinfo("Pārvietošana", "Mērķa mape netika izvēlēta.")
+            return
 
-            # Pārbauda, vai mērķa mape nav pati pašreizējā mape
-            if target_folder == self.current_folder:
-                messagebox.showinfo("Pārvietošana", "Vienumi jau atrodas izvēlētajā mapē.")
-                return
+        # Pārbauda, vai mērķa mape nav pati pašreizējā mape
+        if target_folder == self.current_folder:
+            messagebox.showinfo("Pārvietošana", "Vienumi jau atrodas izvēlētajā mapē.")
+            return
 
-            for item in items_to_move:
-                # Pārbauda, vai mērķa mape nav pati vienums vai tās apakšmape
-                if item["type"] == "folder" and self._is_descendant(target_folder, item):
-                    messagebox.showwarning("Kļūda", f"Mapi '{item['name']}' nevar pārvietot uz tās paša apakšmapi.")
-                    continue
+        moved_count = 0
+        # Jāveido kopija, jo saraksts mainīsies dzēšot elementus
+        # Atlasītie indeksi dilstošā secībā, lai pop() neietekmētu nākamos indeksus
+        items_to_move_with_indices = sorted([(i, self.current_folder["contents"][i]) for i in selection], reverse=True)
 
-                # Pārbauda, vai mērķa mapē jau nav vienums ar tādu pašu nosaukumu
-                # Pārvietojot failus, jāpārliecinās, ka mērķa mapē nav faila ar tādu pašu nosaukumu
-                # Ja ir, varētu piedāvāt pārdēvēt vai ignorēt
-                name_exists = False
-                for existing_item in target_folder["contents"]:
-                    if existing_item["name"] == item["name"] and existing_item["type"] == item["type"]:
-                        name_exists = True
-                        break
+        for original_index, item in items_to_move_with_indices:
+            # Pārbauda, vai mērķa mape nav pati vienums vai tās apakšmape
+            if item["type"] == "folder" and self._is_descendant(target_folder, item):
+                messagebox.showwarning("Kļūda", f"Mapi '{item['name']}' nevar pārvietot uz tās paša apakšmapi.")
+                continue
 
-                if name_exists:
-                    response = messagebox.askyesno("Nosaukums jau eksistē",
-                                                   f"Mērķa mapē jau eksistē vienums ar nosaukumu '{item['name']}'. Vai vēlaties to pārdēvēt?")
-                    if response:
-                        new_name = simpledialog.askstring("Pārdēvēt",
-                                                          f"Ievadiet jauno nosaukumu vienumam '{item['name']}':",
-                                                          parent=self)
-                        if new_name:
-                            item["name"] = new_name
-                        else:
-                            continue  # Atcelt pārvietošanu šim vienumam
+            # Pārbauda, vai mērķa mapē jau nav vienums ar tādu pašu nosaukumu
+            # Ja ir, piedāvā pārdēvēt
+            new_name = item["name"]
+            name_exists = False
+            for existing_item in target_folder["contents"]:
+                if existing_item["name"] == new_name and existing_item["type"] == item["type"]:
+                    name_exists = True
+                    break
+
+            if name_exists:
+                response = messagebox.askyesno("Nosaukums jau eksistē",
+                                               f"Mērķa mapē jau eksistē vienums ar nosaukumu '{new_name}'. Vai vēlaties to pārdēvēt?")
+                if response:
+                    temp_new_name = simpledialog.askstring("Pārdēvēt",
+                                                           f"Ievadiet jauno nosaukumu vienumam '{new_name}':",
+                                                           parent=self, initialvalue=new_name)
+                    if temp_new_name:
+                        new_name = temp_new_name
                     else:
                         continue  # Atcelt pārvietošanu šim vienumam
+                else:
+                    continue  # Atcelt pārvietošanu šim vienumam
 
-                # Noņem vienumu no pašreizējās mapes
-                self.current_folder["contents"].pop(self.drag_data["index"])
-                # Pievieno vienumu mērķa mapei
+            # Iegūst fiziskos ceļus
+            old_physical_path = self._get_physical_path_from_node(item)
+            target_physical_path = self._get_physical_path_from_node(target_folder)
+            new_physical_path = os.path.join(target_physical_path, new_name)
+
+            try:
+                # Pārvieto fizisko failu/mapi
+                if os.path.exists(old_physical_path):
+                    os.rename(old_physical_path, new_physical_path)
+                    print(f"Fiziski pārvietots: {old_physical_path} -> {new_physical_path}")
+                else:
+                    print(f"Brīdinājums: Fiziskais fails/mape neeksistē: {old_physical_path}. Pārvieto tikai iekšēji.")
+
+                # Ja fiziskā pārvietošana veiksmīga, atjaunina iekšējo struktūru
+                self.current_folder["contents"].pop(original_index)  # Izmanto original_index
+                item["name"] = new_name  # Atjaunina nosaukumu, ja tas tika mainīts
+                item["filepath"] = new_physical_path  # Atjaunina filepath failiem
                 target_folder["contents"].append(item)
                 item["parent"] = target_folder  # Atjaunina vecāka atsauci
                 moved_count += 1
 
-            if moved_count > 0:
-                self.refresh_pdf_list()
-                messagebox.showinfo("Pārvietots", f"Veiksmīgi pārvietoti {moved_count} vienumi.")
-            else:
-                messagebox.showinfo("Pārvietošana", "Neviens vienums netika pārvietots.")
+            except OSError as e:
+                messagebox.showerror("Pārvietošanas kļūda", f"Neizdevās pārvietot '{item['name']}':\n{e}")
+            except Exception as e:
+                messagebox.showerror("Kļūda", f"Neparedzēta kļūda pārvietojot '{item['name']}':\n{e}")
+
+        if moved_count > 0:
+            self.refresh_pdf_list()
+            messagebox.showinfo("Pārvietots", f"Veiksmīgi pārvietoti {moved_count} vienumi.")
         else:
-            messagebox.showinfo("Pārvietošana", "Mērķa mape netika izvēlēta.")
+            messagebox.showinfo("Pārvietošana", "Neviens vienums netika pārvietots.")
+
+
 
     def _select_folder_dialog(self, root_folder):
         """Atver dialogu mapes izvēlei iekšējā failu sistēmā."""
@@ -2687,10 +8140,18 @@ class OCRPDFApp(ttk.Window):
 
         def populate_treeview_with_data(treeview, parent_node_id, folder_data):
             # Pievieno mapes objektu kā vērtību, lai to varētu atgūt on_select
-            node_id = treeview.insert(parent_node_id, "end", text=folder_data["name"], open=False, tags=("folder",),
-                                      values=(folder_data,))  # Šeit saglabājam visu mapes dict kā vērtību
+            # Pārbaudām, vai tas nav saknes mezgls, lai nerādītu "Sakne" kā izvēles opciju
+            if folder_data["name"] == "Sakne" and parent_node_id == "":
+                node_id = treeview.insert(parent_node_id, "end", text="Sakne (Pašreizējā mape)", open=True,
+                                          tags=("folder",),
+                                          values=(folder_data,))
+            else:
+                node_id = treeview.insert(parent_node_id, "end", text=folder_data["name"], open=False, tags=("folder",),
+                                          values=(folder_data,))  # Šeit saglabājam visu mapes dict kā vērtību
+
             for item in folder_data["contents"]:
                 if item["type"] == "folder":
+                    # Rekursīvi izsaucam funkciju katrai apakšmapei
                     populate_treeview_with_data(treeview, node_id, item)
                 # Failus nepievienojam, jo dialogs ir paredzēts tikai mapju izvēlei
 
@@ -2710,7 +8171,7 @@ class OCRPDFApp(ttk.Window):
         return False
 
     def rename_selected_item(self):
-        """Pārdēvē atlasīto vienumu (failu vai mapi)."""
+        """Pārdēvē atlasīto vienumu (failu vai mapi) iekšējā failu sistēmā un fiziski diskā."""
         selection = self.pdf_listbox.curselection()
         if not selection:
             messagebox.showwarning("Nav atlasīts", "Lūdzu, atlasiet vienumu, ko pārdēvēt.")
@@ -2723,125 +8184,141 @@ class OCRPDFApp(ttk.Window):
         new_name = simpledialog.askstring("Pārdēvēt", f"Ievadiet jauno nosaukumu vienumam '{old_name}':",
                                           initialvalue=old_name, parent=self)
 
-        if new_name and new_name != old_name:
-            # Pārbauda, vai jaunais nosaukums jau eksistē
-            for existing_item in self.current_folder["contents"]:
-                if existing_item["name"] == new_name and existing_item["type"] == item["type"]:
-                    messagebox.showwarning("Nosaukums jau eksistē",
-                                           f"Vienums ar nosaukumu '{new_name}' jau eksistē šajā mapē.")
-                    return
+        if not new_name or new_name == old_name:
+            return  # Lietotājs atcēla vai nosaukums nav mainīts
 
+        # Pārbauda, vai jaunais nosaukums jau eksistē iekšējā struktūrā
+        for existing_item in self.current_folder["contents"]:
+            if existing_item["name"] == new_name and existing_item["type"] == item["type"]:
+                messagebox.showwarning("Nosaukums jau eksistē",
+                                       f"Vienums ar nosaukumu '{new_name}' jau eksistē šajā mapē.")
+                return
+
+        # Iegūst fiziskos ceļus
+        current_physical_path = self._get_physical_path_from_node(self.current_folder)
+        old_physical_path = os.path.join(current_physical_path, old_name)
+        new_physical_path = os.path.join(current_physical_path, new_name)
+
+        try:
+            # Pārdēvē fizisko failu/mapi
+            if os.path.exists(old_physical_path):
+                os.rename(old_physical_path, new_physical_path)
+                print(f"Fiziski pārdēvēts: {old_physical_path} -> {new_physical_path}")
+            else:
+                print(f"Brīdinājums: Fiziskais fails/mape neeksistē: {old_physical_path}. Pārdēvē tikai iekšēji.")
+
+            # Ja fiziskā pārdēvēšana veiksmīga, atjaunina iekšējo struktūru
             item["name"] = new_name
-            # Ja tas ir fails, jāatjaunina arī filepath, ja tas ir atkarīgs no nosaukuma
             if item["type"] == "file":
-                # Šeit varētu būt sarežģītāk, ja faili tiek saglabāti ar nosaukumu, kas ietver doc_id
-                # Vienkāršības labad pieņemam, ka filepath paliek nemainīgs, ja vien nav nepieciešams pārdēvēt arī fizisko failu
-                # Ja nepieciešams pārdēvēt arī fizisko failu, tad:
-                # old_filepath = item["filepath"]
-                # new_filepath = os.path.join(os.path.dirname(old_filepath), new_name)
-                # try:
-                #     os.rename(old_filepath, new_filepath)
-                #     item["filepath"] = new_filepath
-                # except Exception as e:
-                #     messagebox.showerror("Kļūda", f"Neizdevās pārdēvēt fizisko failu: {e}")
-                #     return
-                pass  # Pašlaik fiziskais fails netiek pārdēvēts, tikai loģiskais nosaukums
+                item["filepath"] = new_physical_path  # Atjaunina filepath failiem
 
             self.refresh_pdf_list()
             messagebox.showinfo("Pārdēvēts", f"Vienums veiksmīgi pārdēvēts uz '{new_name}'.")
 
+        except OSError as e:
+            messagebox.showerror("Pārdēvēšanas kļūda", f"Neizdevās pārdēvēt '{old_name}' uz '{new_name}':\n{e}")
+        except Exception as e:
+            messagebox.showerror("Kļūda", f"Neparedzēta kļūda pārdēvējot '{old_name}':\n{e}")
+
+    from docx import Document
+    from docx.shared import Inches
+    from pdf2image import convert_from_path
+    import tempfile
+    import os
+    from tkinter import filedialog, messagebox
+
+    from docx import Document
+    from docx.shared import Inches
+    from pdf2image import convert_from_path
+    import tempfile
+    import os
+    from tkinter import filedialog, messagebox
+
     def save_as_word(self):
-        """
-        Saglabā atlasītos PDF failus kā Word dokumentus, izmantojot OCR tekstu.
-        """
-        selection = self.pdf_listbox.curselection()
-        if not selection:
-            messagebox.showwarning("Nav atlasīts", "Lūdzu, atlasiet PDF failu(s), ko saglabāt kā Word.")
+        index = getattr(self, '_selected_line_index', -1)
+        if index == -1:
+            messagebox.showwarning("Nav atlasīts", "Lūdzu, atlasiet PDF failu.")
             return
 
-        selected_items = []
-        for index in selection:
-            item = self.current_folder["contents"][index]
-            if item["type"] == "file":
-                selected_items.append(item)
-            else:
-                messagebox.showwarning("Nav fails", f"Vienums '{item['name']}' nav fails un netiks apstrādāts.")
-
-        if not selected_items:
-            messagebox.showwarning("Nav failu", "Neviens derīgs fails nav atlasīts saglabāšanai.")
+        selected_item = self._displayed_items[index]
+        if selected_item["type"] != "file" or not selected_item["name"].lower().endswith(".pdf"):
+            messagebox.showwarning("Nepareizs fails", "Lūdzu, atlasiet PDF failu.")
             return
 
-        for item in selected_items:
-            pdf_filepath = item['filepath']
-            doc_id = item['doc_id']
-            doc_name = item['name']
+        pdf_path = selected_item["filepath"]
 
-            # Atrod OCR rezultātus pēc doc_id
-            ocr_text = ""
-            # Pārbauda, vai OCR rezultāti jau ir atmiņā
-            found_ocr_in_memory = False
-            for ocr_res in self.ocr_results:
-                if ocr_res and ocr_res.get("doc_id") == doc_id:
-                    ocr_text = ocr_res["full_text"]
-                    found_ocr_in_memory = True
-                    break
+        # Mēģinām iegūt OCR tekstu, ja nav, tad None
+        ocr_text = getattr(self, 'ocr_text', None)
 
-            if not found_ocr_in_memory:
-                # Ja OCR rezultāti nav pieejami atmiņā, mēģina veikt OCR no jauna
-                try:
-                    # PyPDF2 varētu būt nepieciešams, lai izvilktu tekstu no PDF
-                    # Bet, ja PDF ir tikai attēls, tad jāizmanto pytesseract
-                    # Vienkāršības labad pieņemam, ka varam veikt OCR tieši no attēla, ja PDF ir attēls
-                    # Reālā situācijā varētu būt nepieciešams izmantot `pdf2image` bibliotēku, lai konvertētu PDF lapas uz attēliem
-                    # vai `PyPDF2` (vai `pypdf`) lai izvilktu tekstu no teksta PDF.
-                    # Šeit mēs pieņemam, ka PDF ir attēls vai ka varam veikt OCR no tā.
-                    img = Image.open(pdf_filepath)
-                    ocr_text = pytesseract.image_to_string(img, lang="lav+eng")  # Pieņemam latviešu un angļu
-                except Exception as e:
-                    messagebox.showwarning("OCR kļūda", f"Neizdevās iegūt tekstu no {doc_name} priekš Word: {e}")
-                    continue
+        save_path = filedialog.asksaveasfilename(
+            defaultextension=".docx",
+            filetypes=[("Word dokumenti", "*.docx")],
+            title="Saglabāt kā Word dokumentu"
+        )
+        if not save_path:
+            return  # Lietotājs atcēla
 
-            if not ocr_text:
-                messagebox.showwarning("Nav teksta", f"Nav atrasts teksts, ko saglabāt Word dokumentā no {doc_name}.")
-                continue
-
+        try:
             doc = Document()
-            doc.add_heading(f"Dokuments: {doc_name}", level=1)
-            doc.add_paragraph(f"Dokumenta ID: {doc_id}")
-            doc.add_paragraph(f"Oriģinālais fails: {pdf_filepath}")
-            doc.add_paragraph("\n" + ocr_text)
 
-            default_word_filename = os.path.splitext(doc_name)[0] + ".docx"
-            save_path = filedialog.asksaveasfilename(
-                defaultextension=".docx",
-                filetypes=[("Word dokumenti", "*.docx")],
-                initialdir=os.path.dirname(pdf_filepath),
-                initialfile=default_word_filename,
-                title=f"Saglabāt {doc_name} kā Word"
-            )
+            if ocr_text and ocr_text.strip():
+                # Ja OCR teksts ir pieejams un nav tukšs, pievienojam to
+                doc.add_paragraph(ocr_text)
+            else:
+                # Ja nav OCR teksta, var pievienot info vai atstāt tukšu
+                doc.add_paragraph("[Nav pieejams OCR teksts]")
 
-            if save_path:
-                try:
-                    doc.save(save_path)
-                    messagebox.showinfo("Saglabāts", f"Dokuments veiksmīgi saglabāts kā Word: {save_path}")
-                except Exception as e:
-                    messagebox.showerror("Saglabāšanas kļūda", f"Neizdevās saglabāt Word dokumentu: {e}")
+            # Konvertējam PDF pirmo lapu uz attēlu
+            images = convert_from_path(pdf_path, first_page=1, last_page=1, dpi=200)
 
+            if images:
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp_img_file:
+                    images[0].save(tmp_img_file.name, "PNG")
+                    tmp_img_path = tmp_img_file.name
+
+                doc.add_picture(tmp_img_path, width=Inches(6))
+
+                os.remove(tmp_img_path)
+            else:
+                messagebox.showwarning("Brīdinājums", "Neizdevās konvertēt PDF lapu uz attēlu.")
+
+            doc.save(save_path)
+            messagebox.showinfo("Veiksmīgi", f"Dokuments saglabāts: {save_path}")
+
+        except Exception as e:
+            messagebox.showerror("Kļūda", f"Neizdevās saglabāt Word dokumentu:\n{e}")
     def drag_start(self, event):
-        """Sāk vilkšanas operāciju."""
-        selection = self.pdf_listbox.curselection()
-        if selection:
-            self.drag_data["item"] = self.current_folder["contents"][selection[0]]
-            self.drag_data["index"] = selection[0]
-            self.drag_data["x"] = event.x
-            self.drag_data["y"] = event.y
-            # Pievieno vizuālu atgriezenisko saiti (piem., maina kursoru)
-            self.pdf_listbox.config(cursor="fleur")
+        """Sāk vilkšanas operāciju `pdf_listbox`."""
+        # Iegūst elementa indeksu, uz kura tika uzklikšķināts
+        index = self.pdf_listbox.nearest(event.y)
+        if index != -1:
+            self.drag_data["item_index"] = index
+            self.drag_data["start_y"] = event.y
+            # Pārliecinās, ka elements ir atlasīts, lai vizuāli atspoguļotu vilkšanu
+            self.pdf_listbox.selection_clear(0, tk.END)
+            self.pdf_listbox.selection_set(index)
+            self.pdf_listbox.activate(index)
 
     def drag_motion(self, event):
-        """Apstrādā vilkšanas kustību."""
-        # Šeit varētu pievienot vizuālu vilkšanas indikatoru
-        pass
+        """Apstrādā vilkšanas kustību `pdf_listbox`."""
+        if self.drag_data["item_index"] is not None:
+            # Iegūst jauno pozīciju
+            new_index = self.pdf_listbox.nearest(event.y)
+            current_index = self.drag_data["item_index"]
+
+            if new_index != current_index:
+                # Pārvieto elementu pamatā esošajā datu struktūrā
+                item_to_move = self.current_folder["contents"].pop(current_index)
+                self.current_folder["contents"].insert(new_index, item_to_move)
+
+                # Atjaunina vilkšanas datus ar jauno indeksu
+                self.drag_data["item_index"] = new_index
+
+                # Atjauno listbox vizuālo attēlojumu
+                self.refresh_pdf_list()
+                # Pārliecinās, ka pārvietotais elements joprojām ir atlasīts
+                self.pdf_listbox.selection_set(new_index)
+                self.pdf_listbox.activate(new_index)
 
     def drag_drop(self, event):
         """Apstrādā nomešanas operāciju."""
@@ -3118,6 +8595,7 @@ class OCRPDFApp(ttk.Window):
             dialog.destroy()
 
         ttk.Button(button_frame, text="Apstiprināt izvēli", command=confirm_selection).pack(side=tk.LEFT, padx=2)
+
     def create_menu(self):
         """Izveido lietojumprogrammas izvēlni."""
         menu_bar = tk.Menu(self)
@@ -3125,7 +8603,7 @@ class OCRPDFApp(ttk.Window):
         file_menu = tk.Menu(menu_bar, tearoff=0)
         file_menu.add_command(label="Atvērt attēlus...", command=self.open_files)
         file_menu.add_command(label="Vispārīgie Iestatījumi...", command=self.show_settings)  # MAINĪTS TEKSTS
-        file_menu.add_command(label="Skenēšanas Iestatījumi...", command=self.show_scan_settings)  # JAUNA IZVĒLNE
+        file_menu.add_command(label="Skenēšanas Iestatījumi...", command=self.show_scan_settingss)  # JAUNA IZVĒLNE
         file_menu.add_separator()
         file_menu.add_command(label="Iziet", command=self.quit)
         menu_bar.add_cascade(label="Fails", menu=file_menu)
@@ -3136,6 +8614,30 @@ class OCRPDFApp(ttk.Window):
         menu_bar.add_cascade(label="Palīdzība", menu=help_menu)
 
         self.config(menu=menu_bar)
+
+    def scan_document_with_camera_fast(self):
+        """Ļoti ātri atver jaunu skenēšanas logu."""
+        try:
+            # Bez progress loga - tieši iegūst kadru
+            first_frame = self.get_camera_frame()
+            if first_frame:
+                # Tieši izveido jaunu scanner
+                new_scanner = DocumentScanner(self)
+                new_scanner.set_image(first_frame)
+                new_scanner.document_frozen = False
+                new_scanner.live_detected_corners = []
+
+                # Tieši atver logu
+                new_scanner.show_document_detection_preview()
+                new_scanner.start_live_scan()
+
+                self.document_scanner = new_scanner
+            else:
+                messagebox.showwarning("Kļūda", "Nav kameras kadra.")
+                self.release_camera()
+        except Exception as e:
+            messagebox.showerror("Kļūda", f"Kļūda: {e}")
+            self.scan_document_with_camera()
 
     def show_about(self):
         """Parāda informāciju par lietojumprogrammu."""
@@ -3172,7 +8674,8 @@ class OCRPDFApp(ttk.Window):
         if not hasattr(self, '_settings_window') or not self._settings_window.winfo_exists():
             self._settings_window = SettingsWindow(self, self)
         self._settings_window.lift()
-    def show_scan_settings(self):
+
+    def show_scan_settingss(self):
         """JAUNS: Parāda skenēšanas iestatījumu logu."""
         if not hasattr(self, '_scan_settings_window') or not self._scan_settings_window.winfo_exists():
             self._scan_settings_window = ScanSettingsWindow(self, self)
@@ -3183,8 +8686,9 @@ class OCRPDFApp(ttk.Window):
         if filepath is None:
             filepaths = filedialog.askopenfilenames(
                 title="Izvēlieties failus",
-                filetypes=[("PDF faili", "*.pdf"), ("Attēli", "*.png *.jpg *.jpeg")]
+                filetypes=[("Attēli", "*.png *.jpg *.jpeg *.tif *.tiff *.bmp"), ("PDF faili", "*.pdf")]  # Changed order
             )
+
         else:
             filepaths = [filepath]
 
@@ -3218,7 +8722,7 @@ class OCRPDFApp(ttk.Window):
                     self.file_listbox.insert(tk.END, os.path.basename(filepath))
 
                 # Saglabā failu lietotāja datu struktūrā
-                save_user_file(self.username, filepath)  # Saglabā failu lietotāja datu struktūrā
+                # save_user_file(self.username, filepath)  # Komentēts, jo username nav definēts
             except Exception as e:
                 print(f"Kļūda apstrādājot {filepath}: {e}")
 
@@ -3241,6 +8745,16 @@ class OCRPDFApp(ttk.Window):
         self.canvas_zoom_factor = 1.0
         self.canvas_pan_x = 0
         self.canvas_pan_y = 0
+        # JAUNS: Notīra QR koda rāmja mainīgos
+        self.qr_code_frame_id = None
+        self.qr_code_handle_ids = []
+        self.qr_code_active_handle = None
+        self.qr_code_frame_coords = None
+        self.qr_code_start_drag_x = None
+        self.qr_code_start_drag_y = None
+        self.qr_code_drag_mode = None
+        self.btn_toggle_qr_frame.config(bootstyle="default")  # Atjauno pogas stilu
+        self._qr_edit_mode = False
 
     def reset_image_processing_vars(self):
         """Atjauno attēlu apstrādes mainīgos uz noklusējuma vērtībām."""
@@ -3359,46 +8873,39 @@ class OCRPDFApp(ttk.Window):
             self.canvas.delete("all")
             self.text_ocr.delete("1.0", tk.END)
 
-
     def move_file_up(self):
-        """Pārvieto atlasīto failu uz augšu sarakstā."""
+        """Pārvieto atlasīto failu sarakstā uz augšu."""
         selection = self.file_listbox.curselection()
         if not selection:
-            messagebox.showwarning("Nav atlasīts", "Lūdzu, atlasiet failu.")
             return
-
         index = selection[0]
         if index > 0:
-            # Maina vietām ar iepriekšējo
-            self.images[index], self.images[index - 1] = self.images[index - 1], self.images[index]
-            if len(self.ocr_results) > index:
-                self.ocr_results[index], self.ocr_results[index - 1] = self.ocr_results[index - 1], self.ocr_results[
-                    index]
+            # Pārvieto elementu self.images sarakstā
+            item_to_move = self.images.pop(index)
+            self.images.insert(index - 1, item_to_move)
 
-            self.refresh_file_listbox()
-            self.file_listbox.select_set(index - 1)
+            # Atjaunina pašreizējo attēla indeksu
             self.current_image_index = index - 1
-            self.on_file_select()
+
+            # Pilnībā atjauno listbox, lai atspoguļotu jauno secību
+            self.refresh_file_listbox()
 
     def move_file_down(self):
-        """Pārvieto atlasīto failu uz leju sarakstā."""
+        """Pārvieto atlasīto failu sarakstā uz leju."""
         selection = self.file_listbox.curselection()
         if not selection:
-            messagebox.showwarning("Nav atlasīts", "Lūdzu, atlasiet failu.")
             return
-
         index = selection[0]
         if index < len(self.images) - 1:
-            # Maina vietām ar nākošo
-            self.images[index], self.images[index + 1] = self.images[index + 1], self.images[index]
-            if len(self.ocr_results) > index + 1:
-                self.ocr_results[index], self.ocr_results[index + 1] = self.ocr_results[index + 1], self.ocr_results[
-                    index]
+            # Pārvieto elementu self.images sarakstā
+            item_to_move = self.images.pop(index)
+            self.images.insert(index + 1, item_to_move)
 
-            self.refresh_file_listbox()
-            self.file_listbox.select_set(index + 1)
+            # Atjaunina pašreizējo attēla indeksu
             self.current_image_index = index + 1
-            self.on_file_select()
+
+            # Pilnībā atjauno listbox, lai atspoguļotu jauno secību
+            self.refresh_file_listbox()
 
     def file_list_drag_start(self, event):
         """Sāk vilkšanas operāciju attēlu sarakstā."""
@@ -3446,7 +8953,7 @@ class OCRPDFApp(ttk.Window):
                 # Ievieto pārvietotos vienumus jaunajā pozīcijā
                 for i, img_data in enumerate(moved_images):
                     insert_idx = target_index if target_index < current_index else target_index - (
-                                len(selected_indices) - 1) + i
+                            len(selected_indices) - 1) + i
                     self.images.insert(insert_idx, img_data)
                     self.ocr_results.insert(insert_idx, moved_ocr_results[i])
 
@@ -3474,29 +8981,22 @@ class OCRPDFApp(ttk.Window):
 
         # Pilnībā aizvietojiet esošo refresh_file_listbox metodi ar šo:
 
-        def refresh_file_listbox(self):
-            """Atjauno failu saraksta izskatu"""
-            current_selection = self.file_listbox.curselection()  # Saglabā aktuālo atlasi
-            self.file_listbox.delete(0, tk.END)
+    def refresh_file_listbox(self):
+        """
+        Atjaunina failu sarakstu `file_listbox` no `self.images` saraksta.
+        Nodrošina, ka vizuālais attēlojums atbilst pamatā esošajai datu struktūrai.
+        """
+        self.file_listbox.delete(0, tk.END)
+        for i, img_data in enumerate(self.images):
+            # Izmanto 'display_name', ja pieejams, citādi faila nosaukumu
+            display_name = img_data.get("display_name", os.path.basename(img_data["filepath"]))
+            self.file_listbox.insert(tk.END, f"{i + 1}. {display_name}")
 
-            for i, img_data in enumerate(self.images):
-                # Noteik faila nosaukumu
-                if "Lapa" in img_data["filepath"]:
-                    display_name = img_data["filepath"]
-                else:
-                    display_name = os.path.basename(img_data["filepath"])
-
-                self.file_listbox.insert(tk.END, display_name)
-
-                # Iestata fona krāsu, ja fails ir apstrādāts
-                if i < len(self.ocr_results) and self.ocr_results[i] is not None:
-                    self.file_listbox.itemconfig(i, {'bg': '#d4edda'})
-
-            # Atjauno iepriekšējo atlasi
-            if current_selection:
-                for index in current_selection:
-                    if index < self.file_listbox.size():
-                        self.file_listbox.selection_set(index)
+        # Atjauno atlasi un ritināšanu, ja ir atlasīts attēls
+        if self.current_image_index != -1 and self.current_image_index < len(self.images):
+            self.file_listbox.selection_set(self.current_image_index)
+            self.file_listbox.activate(self.current_image_index)
+            self.file_listbox.see(self.current_image_index)
 
     def on_file_click(self, event):
         """Apstrādā vienu klikšķi uz faila, lai to apskatītu."""
@@ -3625,7 +9125,7 @@ class OCRPDFApp(ttk.Window):
                 # Ievieto pārvietotos vienumus jaunajā pozīcijā
                 for i, img_data in enumerate(moved_images):
                     insert_idx = target_index if target_index < current_index else target_index - (
-                                len(selected_indices) - 1) + i
+                            len(selected_indices) - 1) + i
                     self.images.insert(insert_idx, img_data)
                     self.ocr_results.insert(insert_idx, moved_ocr_results[i])
 
@@ -3717,25 +9217,51 @@ class OCRPDFApp(ttk.Window):
         else:
             messagebox.showwarning("Fails nav atrasts", "Attēla fails nav atrasts norādītajā vietā.")
 
-    def on_file_select(self):
-        """Apstrādā faila atlasi sarakstā, atjauninot priekšskatījumu un OCR tekstu."""
-        selection = self.file_listbox.curselection()
-        if not selection or not self.images:
+    def on_file_select(self, event=None):
+        """Apstrādā faila atlasi sarakstā."""
+        if self.file_listbox.curselection():
+            selected_index = self.file_listbox.curselection()[0]
+            self.current_image_index = selected_index
+
+            # Pārbauda, vai atlasītais fails ir attēls vai PDF
+            if self.current_image_index < len(self.images):
+                selected_item = self.images[self.current_image_index]
+                if "processed_img" in selected_item and selected_item["processed_img"] is not None:
+                    self.show_image_preview(selected_item["processed_img"])
+                else:
+                    # Ja nav apstrādāta attēla, mēģina parādīt oriģinālo
+                    if "original_img" in selected_item and selected_item["original_img"] is not None:
+                        self.show_image_preview(selected_item["original_img"])
+                    else:
+                        # Ja nav ne apstrādāta, ne oriģinālā attēla, notīra priekšskatījumu
+                        self.canvas.delete("all")
+                        self.canvas.create_text(self.canvas.winfo_width() / 2, self.canvas.winfo_height() / 2,
+                                                text="Nav attēla priekšskatījumam", fill="white")
+
+                # Atjaunina OCR teksta lauku
+                if self.current_image_index < len(self.ocr_results) and self.ocr_results[
+                    self.current_image_index] is not None:
+                    self.text_ocr.delete("1.0", tk.END)
+                    self.text_ocr.insert("1.0", self.ocr_results[self.current_image_index])
+                else:
+                    self.text_ocr.delete("1.0", tk.END)
+                    self.text_ocr.insert("1.0", "OCR rezultāts nav pieejams.")
+
+                # JAUNS: Atjaunina "Papildu rīki" cilnes priekšskatījumu
+                self._update_additional_tools_pdf_preview()
+            else:
+                # Ja atlase ir ārpus saraksta robežām (piemēram, pēc dzēšanas)
+                self.current_image_index = -1
+                self.canvas.delete("all")
+                self.text_ocr.delete("1.0", tk.END)
+                self.text_ocr.insert("1.0", "Nav atlasīts fails.")
+                self._clear_additional_tools_pdf_preview()  # Notīra arī papildu rīku priekšskatījumu
+        else:
             self.current_image_index = -1
             self.canvas.delete("all")
             self.text_ocr.delete("1.0", tk.END)
-            return
-
-        index = selection[0]
-        self.current_image_index = index
-        self.apply_image_filters(None)
-
-        if len(self.ocr_results) > index and self.ocr_results[index] is not None:
-            self.text_ocr.delete("1.0", tk.END)
-            self.text_ocr.insert(tk.END, self.ocr_results[index]['full_text'])
-        else:
-            self.text_ocr.delete("1.0", tk.END)
-            self.text_ocr.insert(tk.END, "OCR rezultāts vēl nav pieejams.")
+            self.text_ocr.insert("1.0", "Nav atlasīts fails.")
+            self._clear_additional_tools_pdf_preview()  # Notīra arī papildu rīku priekšskatījumu
 
     def apply_image_filters(self, event):
         """Pielieto attēlu apstrādes filtrus pašreizējam attēlam."""
@@ -3815,6 +9341,53 @@ class OCRPDFApp(ttk.Window):
         img_data["processed_img"] = img
         self.show_image_preview(img)
 
+    def _set_default_qr_frame_coords(self):
+        """Iestata default QR koda rāmja koordinātas balstoties uz iestatījumiem."""
+        if self.current_image_index == -1:
+            return
+
+        img_data = self.images[self.current_image_index]
+        img_pil = img_data["processed_img"]
+        img_width, img_height = img_pil.size
+
+        # Default izmērs (10% no mazākās puses)
+        qr_size = min(img_width, img_height) * 0.10
+        margin = min(img_width, img_height) * 0.02
+
+        # Iegūst pozīciju no iestatījumiem
+        # Pārliecināmies, ka izmantojam pareizo atslēgu un noklusējuma vērtību
+        id_code_position = self.settings.get("id_code_position", "bottom_right")
+
+        print(f"DEBUG: Iestatītā QR pozīcija: {id_code_position}")  # Debug rinda
+
+        if id_code_position == "top_left":  # MAINĪTS: no "top-left" uz "top_left"
+            x1 = margin
+            y1 = margin
+            print(f"DEBUG: Izmanto top-left pozīciju: x1={x1}, y1={y1}")
+        elif id_code_position == "top_right":
+            x1 = img_width - qr_size - margin
+            y1 = margin
+            print(f"DEBUG: Izmanto top-right pozīciju: x1={x1}, y1={y1}")
+        elif id_code_position == "bottom_left":  # MAINĪTS: no "bottom-left" uz "bottom_left"
+            x1 = margin
+            y1 = img_height - qr_size - margin
+            print(f"DEBUG: Izmanto bottom-left pozīciju: x1={x1}, y1={y1}")
+        elif id_code_position == "bottom_right":  # MAINĪTS: no "bottom-right" uz "bottom_right"
+            x1 = img_width - qr_size - margin
+            y1 = img_height - qr_size - margin
+            print(f"DEBUG: Izmanto bottom-right pozīciju: x1={x1}, y1={y1}")
+        else:
+            # Fallback uz bottom-right, ja nav atpazīts
+            x1 = img_width - qr_size - margin
+            y1 = img_height - qr_size - margin
+            print(f"DEBUG: Nezināma pozīcija '{id_code_position}', izmanto bottom-right: x1={x1}, y1={y1}")
+
+        x2 = x1 + qr_size
+        y2 = y1 + qr_size
+
+        self.qr_code_frame_coords = (x1, y1, x2, y2)
+        print(f"DEBUG: Finālās koordinātas: {self.qr_code_frame_coords}")
+
     def show_image_preview(self, img):
         """Parāda attēla priekšskatījumu uz kanvasa."""
         canvas_width = self.canvas.winfo_width()
@@ -3837,6 +9410,143 @@ class OCRPDFApp(ttk.Window):
 
         self.canvas.create_image(x, y, anchor="nw", image=self.photo_image)
         self.canvas.image = self.photo_image
+
+        # JAUNS: Zīmē QR koda/svītrkoda rāmi, ja tas ir aktīvs
+        # JAUNS: Zīmē QR koda/svītrkoda rāmi, ja tas ir aktīvs
+        # JAUNS: Zīmē QR koda/svītrkoda rāmi, ja funkcija ir ieslēgta vai manuāli aktivizēta
+        should_show_qr_frame = (self.settings.get("add_id_code_to_pdf", False) or
+                                self.qr_code_frame_coords is not None)
+
+        if should_show_qr_frame:
+            # Ja nav manuāli iestatītas koordinātas, izmanto default pozīciju
+            if not hasattr(self, 'qr_code_frame_coords') or self.qr_code_frame_coords is None:
+                self._set_default_qr_frame_coords()
+
+            # Notīra vecos QR rāmja elementus
+            self.canvas.delete("qr_frame")
+            self.canvas.delete("qr_handle")
+
+            # Pārrēķina rāmja koordinātas uz kanvasa koordinātām
+            x1_img, y1_img, x2_img, y2_img = self.qr_code_frame_coords
+
+            # Pārrēķina rāmja koordinātas no oriģinālā attēla uz kanvasa koordinātām
+            x1_canvas = x + x1_img * self.canvas_zoom_factor
+            y1_canvas = y + y1_img * self.canvas_zoom_factor
+            x2_canvas = x + x2_img * self.canvas_zoom_factor
+            y2_canvas = y + y2_img * self.canvas_zoom_factor
+
+            # Aprēķina kvadrātisku izmēru (aspect ratio 1:1)
+            frame_width = x2_canvas - x1_canvas
+            frame_height = y2_canvas - y1_canvas
+            square_size = min(frame_width, frame_height)
+
+            # Centrē kvadrātu rāmja ietvaros
+            center_x = (x1_canvas + x2_canvas) / 2
+            center_y = (y1_canvas + y2_canvas) / 2
+            x1_canvas = center_x - square_size / 2
+            y1_canvas = center_y - square_size / 2
+            x2_canvas = center_x + square_size / 2
+            y2_canvas = center_y + square_size / 2
+
+            # Zīmē rāmi
+            self.qr_code_frame_id = self.canvas.create_rectangle(
+                x1_canvas, y1_canvas, x2_canvas, y2_canvas,
+                outline="yellow", width=2, dash=(5, 2), tags="qr_frame"
+            )
+
+            # Zīmē stūru rokturus
+            handle_size = 8
+            self.qr_code_handle_ids = []
+            handles = [
+                (x1_canvas, y1_canvas, "nw"),
+                (x2_canvas, y1_canvas, "ne"),
+                (x2_canvas, y2_canvas, "se"),
+                (x1_canvas, y2_canvas, "sw")
+            ]
+            for x_handle, y_handle, cursor_type in handles:
+                handle_id = self.canvas.create_oval(
+                    x_handle - handle_size, y_handle - handle_size,
+                    x_handle + handle_size, y_handle + handle_size,
+                    fill="cyan", outline="white", width=2, tags="qr_handle"
+                )
+                self.qr_code_handle_ids.append({"id": handle_id, "type": cursor_type})
+
+            # Pārvieto QR elementus uz priekšu (virs attēla)
+            self.canvas.tag_raise("qr_frame")
+            self.canvas.tag_raise("qr_handle")
+
+        # Notīra veco attēlu pirms jauna zīmēšanas
+        self.canvas.delete("image")
+        self.canvas.create_image(x, y, anchor="nw", image=self.photo_image, tags="image")
+        self.canvas.image = self.photo_image
+
+        # JAUNS: Zīmē QR koda/svītrkoda rāmi, ja funkcija ir ieslēgta vai manuāli aktivizēta
+        should_show_qr_frame = (self.settings.get("add_id_code_to_pdf", False) or
+                                self.qr_code_frame_coords is not None)
+
+        if should_show_qr_frame:
+            # Ja nav manuāli iestatītas koordinātas, izmanto default pozīciju
+            if not hasattr(self, 'qr_code_frame_coords') or self.qr_code_frame_coords is None:
+                self._set_default_qr_frame_coords()
+
+            # Notīra vecos QR rāmja elementus
+            self.canvas.delete("qr_frame")
+            self.canvas.delete("qr_handle")
+
+            # Pārrēķina rāmja koordinātas uz kanvasa koordinātām
+            x1_img, y1_img, x2_img, y2_img = self.qr_code_frame_coords
+
+            # Pārrēķina rāmja koordinātas no oriģinālā attēla uz kanvasa koordinātām
+            x1_canvas = x + x1_img * self.canvas_zoom_factor
+            y1_canvas = y + y1_img * self.canvas_zoom_factor
+            x2_canvas = x + x2_img * self.canvas_zoom_factor
+            y2_canvas = y + y2_img * self.canvas_zoom_factor
+
+            # Aprēķina kvadrātisku izmēru (aspect ratio 1:1)
+            frame_width = x2_canvas - x1_canvas
+            frame_height = y2_canvas - y1_canvas
+            square_size = min(frame_width, frame_height)
+
+            # Centrē kvadrātu rāmja ietvaros
+            center_x = (x1_canvas + x2_canvas) / 2
+            center_y = (y1_canvas + y2_canvas) / 2
+            x1_canvas = center_x - square_size / 2
+            y1_canvas = center_y - square_size / 2
+            x2_canvas = center_x + square_size / 2
+            y2_canvas = center_y + square_size / 2
+
+            # Zīmē rāmi
+            self.qr_code_frame_id = self.canvas.create_rectangle(
+                x1_canvas, y1_canvas, x2_canvas, y2_canvas,
+                outline="yellow", width=3, dash=(5, 2), tags="qr_frame"
+            )
+
+            # Zīmē stūru rokturus
+            handle_size = 10
+            self.qr_code_handle_ids = []
+            handles = [
+                (x1_canvas, y1_canvas, "nw"),
+                (x2_canvas, y1_canvas, "ne"),
+                (x2_canvas, y2_canvas, "se"),
+                (x1_canvas, y2_canvas, "sw")
+            ]
+            for x_handle, y_handle, cursor_type in handles:
+                handle_id = self.canvas.create_oval(
+                    x_handle - handle_size, y_handle - handle_size,
+                    x_handle + handle_size, y_handle + handle_size,
+                    fill="red", outline="white", width=3, tags="qr_handle"
+                )
+                self.qr_code_handle_ids.append({"id": handle_id, "type": cursor_type})
+
+            # SVARĪGI: Pārvieto QR elementus uz priekšu (virs attēla)
+            self.canvas.tag_raise("qr_frame")
+            self.canvas.tag_raise("qr_handle")
+
+            # Papildu pārbaude - pārvieto vēlreiz, lai būtu droši, ka ir virs
+            for handle_data in self.qr_code_handle_ids:
+                self.canvas.tag_raise(handle_data["id"])
+            if self.qr_code_frame_id:
+                self.canvas.tag_raise(self.qr_code_frame_id)
 
     def resize_canvas(self, event):
         """Pielāgo kanvasa izmērus un atjaunina attēla priekšskatījumu."""
@@ -3873,31 +9583,230 @@ class OCRPDFApp(ttk.Window):
         self.canvas.config(cursor="arrow")
 
     def on_canvas_selection_start(self, event):
-        """Sāk atlases taisnstūra zīmēšanu uz kanvasa."""
+        """Sāk atlases taisnstūra zīmēšanu vai QR koda rāmja vilkšanu uz kanvasa."""
         if self.current_image_index == -1: return
-        self.canvas_selection_start_x = self.canvas.canvasx(event.x)
-        self.canvas_selection_start_y = self.canvas.canvasy(event.y)
-        if self.canvas_selection_rect:
-            self.canvas.delete(self.canvas_selection_rect)
-        self.canvas_selection_rect = self.canvas.create_rectangle(self.canvas_selection_start_x,
-                                                                  self.canvas_selection_start_y,
-                                                                  self.canvas_selection_start_x,
-                                                                  self.canvas_selection_start_y,
-                                                                  outline="blue", width=2, dash=(5, 2))
+
+        # Pārbauda QR rāmja mijiedarbību tikai rediģēšanas režīmā
+        if hasattr(self, '_qr_edit_mode') and self._qr_edit_mode:
+            item = self.canvas.find_closest(event.x, event.y)[0]
+            tags = self.canvas.gettags(item)
+
+            if "qr_handle" in tags:
+                self.qr_code_active_handle = next((h for h in self.qr_code_handle_ids if h["id"] == item), None)
+                if self.qr_code_active_handle:
+                    self.qr_code_drag_mode = 'resize'
+                    self.qr_code_start_drag_x = event.x
+                    self.qr_code_start_drag_y = event.y
+                    cursor_map = {
+                        "nw": "top_left_corner",
+                        "ne": "top_right_corner",
+                        "se": "bottom_right_corner",
+                        "sw": "bottom_left_corner"
+                    }
+                    cursor_name = cursor_map.get(self.qr_code_active_handle["type"], "sizing")
+                    self.canvas.config(cursor=cursor_name)
+                    return
+            elif "qr_frame" in tags:
+                self.qr_code_drag_mode = 'move'
+                self.qr_code_start_drag_x = event.x
+                self.qr_code_start_drag_y = event.y
+                self.canvas.config(cursor="fleur")
+                return
+
+        # Ja nav QR koda rāmja mijiedarbība, tad turpina ar apgriešanas vai atlases režīmu
+        if self.cropping_mode:
+            self.crop_start_x = self.canvas.canvasx(event.x)
+            self.crop_start_y = self.canvas.canvasy(event.y)
+            if self.crop_rect_id:
+                self.canvas.delete(self.crop_rect_id)
+            self.crop_rect_id = self.canvas.create_rectangle(self.crop_start_x, self.crop_start_y,
+                                                             self.crop_start_x, self.crop_start_y,
+                                                             outline="red", width=2, dash=(5, 2))
+        else:
+            self.canvas_selection_start_x = self.canvas.canvasx(event.x)
+            self.canvas_selection_start_y = self.canvas.canvasy(event.y)
+            if self.canvas_selection_rect:
+                self.canvas.delete(self.canvas_selection_rect)
+            self.canvas_selection_rect = self.canvas.create_rectangle(self.canvas_selection_start_x,
+                                                                      self.canvas_selection_start_y,
+                                                                      self.canvas_selection_start_x,
+                                                                      self.canvas_selection_start_y,
+                                                                      outline="blue", width=2, dash=(5, 2))
 
     def on_canvas_selection_drag(self, event):
-        """Atjaunina atlases taisnstūra izmērus uz kanvasa, velkot peli."""
+        """Atjaunina atlases taisnstūra vai QR koda rāmja izmērus/pozīciju uz kanvasa, velkot peli."""
         if self.current_image_index == -1: return
+
         cur_x = self.canvas.canvasx(event.x)
         cur_y = self.canvas.canvasy(event.y)
-        self.canvas.coords(self.canvas_selection_rect, self.canvas_selection_start_x, self.canvas_selection_start_y,
-                           cur_x, cur_y)
+
+        if self.qr_code_drag_mode == 'move' and self.qr_code_frame_coords:
+            dx = (cur_x - self.qr_code_start_drag_x) / self.canvas_zoom_factor
+            dy = (cur_y - self.qr_code_start_drag_y) / self.canvas_zoom_factor
+
+            x1, y1, x2, y2 = self.qr_code_frame_coords
+            self.qr_code_frame_coords = (x1 + dx, y1 + dy, x2 + dx, y2 + dy)
+
+            self.qr_code_start_drag_x = cur_x
+            self.qr_code_start_drag_y = cur_y
+            # Atjauno tikai attēla priekšskatījumu bez pilnas pārzīmēšanas
+            img_data = self.images[self.current_image_index]
+            self.show_image_preview(img_data["processed_img"])
+
+
+
+        elif self.qr_code_drag_mode == 'resize' and self.qr_code_active_handle and self.qr_code_frame_coords:
+
+            x1, y1, x2, y2 = self.qr_code_frame_coords
+
+            dx = (cur_x - self.qr_code_start_drag_x) / self.canvas_zoom_factor
+
+            dy = (cur_y - self.qr_code_start_drag_y) / self.canvas_zoom_factor
+
+            handle_type = self.qr_code_active_handle["type"]
+
+            # Aprēķina jauno izmēru, saglabājot kvadrātisku formu
+
+            if handle_type in ["nw", "se"]:
+
+                # Diagonālie stūri - izmanto vidējo no dx un dy
+
+                delta = (dx + dy) / 2
+
+                if handle_type == "nw":
+
+                    x1 += delta
+
+                    y1 += delta
+
+                else:  # se
+
+                    x2 += delta
+
+                    y2 += delta
+
+            elif handle_type in ["ne", "sw"]:
+
+                # Pretējie diagonālie stūri
+
+                delta = (dx - dy) / 2
+
+                if handle_type == "ne":
+
+                    x2 += delta
+
+                    y1 -= delta
+
+                else:  # sw
+
+                    x1 -= delta
+
+                    y2 += delta
+
+            # Nodrošina minimālo izmēru
+
+            min_size = min(self.images[self.current_image_index]["processed_img"].size) * 0.05
+
+            if (x2 - x1) < min_size or (y2 - y1) < min_size:
+                return
+
+            self.qr_code_frame_coords = (x1, y1, x2, y2)
+
+            self.qr_code_start_drag_x = cur_x
+
+            self.qr_code_start_drag_y = cur_y
+
+            img_data = self.images[self.current_image_index]
+
+            self.show_image_preview(img_data["processed_img"])
+
+
+        elif self.cropping_mode and self.crop_rect_id:
+            self.canvas.coords(self.crop_rect_id, self.crop_start_x, self.crop_start_y, cur_x, cur_y)
+        elif self.canvas_selection_rect:
+            self.canvas.coords(self.canvas_selection_rect, self.canvas_selection_start_x, self.canvas_selection_start_y,
+                               cur_x, cur_y)
 
     def on_canvas_selection_end(self, event):
-        """Beidz atlases taisnstūra zīmēšanu uz kanvasa (šeit varētu apstrādāt iezīmēto apgabalu)."""
+        """Beidz atlases taisnstūra vai QR koda rāmja zīmēšanu/vilkšanu uz kanvasa."""
         if self.current_image_index == -1: return
-        # Šeit varētu apstrādāt iezīmēto apgabalu, piemēram, apgriezt vai veikt OCR uz iezīmētā apgabala
-        pass
+
+        self.canvas.config(cursor="arrow")  # Atjauno noklusējuma kursoru
+        self.qr_code_drag_mode = None
+        self.qr_code_active_handle = None
+        self.qr_code_start_drag_x = None
+        self.qr_code_start_drag_y = None
+
+        if self.cropping_mode:
+            end_x = self.canvas.canvasx(event.x)
+            end_y = self.canvas.canvasy(event.y)
+
+            x1, y1 = min(self.crop_start_x, end_x), min(self.crop_start_y, end_y)
+            x2, y2 = max(self.crop_start_x, end_x), max(self.crop_start_y, end_y)
+
+            img_data = self.images[self.current_image_index]
+            img_pil = img_data["processed_img"]
+            img_width, img_height = img_pil.size
+
+            canvas_width = self.canvas.winfo_width()
+            canvas_height = self.canvas.winfo_height()
+
+            scaled_width = int(img_width * self.canvas_zoom_factor)
+            scaled_height = int(img_height * self.canvas_zoom_factor)
+            img_on_canvas_x = (canvas_width - scaled_width) / 2 + self.canvas_pan_x
+            img_on_canvas_y = (canvas_height - scaled_height) / 2 + self.canvas_pan_y
+
+            original_x1 = int((x1 - img_on_canvas_x) / self.canvas_zoom_factor)
+            original_y1 = int((y1 - img_on_canvas_y) / self.canvas_zoom_factor)
+            original_x2 = int((x2 - img_on_canvas_x) / self.canvas_zoom_factor)
+            original_y2 = int((y2 - img_on_canvas_y) / self.canvas_zoom_factor)
+
+            original_x1 = max(0, min(original_x1, img_width))
+            original_y1 = max(0, min(original_y1, img_height))
+            original_x2 = max(0, min(original_x2, img_width))
+            original_y2 = max(0, min(original_y2, img_height))
+
+            self.current_crop_coords = (original_x1, original_y1, original_x2, original_y2)
+
+            if messagebox.askyesno("Apgriezt attēlu", "Vai vēlaties apgriezt attēlu ar atlasīto apgabalu?"):
+                self.perform_crop()
+
+            if self.crop_rect_id:
+                self.canvas.delete(self.crop_rect_id)
+                self.crop_rect_id = None
+            self.toggle_cropping_mode()
+
+        else:
+            # Esošais kods parastai atlasei
+            pass
+
+    def perform_crop(self):
+        """Veic attēla apgriešanu, pamatojoties uz saglabātajām koordinātām."""
+        if self.current_image_index == -1 or not self.current_crop_coords:
+            messagebox.showwarning("Kļūda", "Nav attēla vai apgriešanas koordinātu.")
+            return
+
+        img_data = self.images[self.current_image_index]
+        img_pil = img_data["processed_img"]
+
+        try:
+            cropped_img = img_pil.crop(self.current_crop_coords)
+            img_data["processed_img"] = cropped_img
+            self.show_image_preview(cropped_img)
+            messagebox.showinfo("Apgriešana", "Attēls veiksmīgi apgriezts.")
+        except Exception as e:
+            messagebox.showerror("Apgriešanas kļūda", f"Neizdevās apgriezt attēlu: {e}")
+        finally:
+            self.current_crop_coords = None  # Notīra koordinātas pēc apgriešanas
+
+        # JAUNS: Mainīgie QR koda/svītrkoda rāmja attēlošanai un mijiedarbībai
+        self.qr_code_frame_id = None  # Kanvasa ID QR koda rāmim
+        self.qr_code_handle_ids = []  # Kanvasa ID rāmja stūru rokturiem
+        self.qr_code_active_handle = None  # Aktīvais rokturis vilkšanas laikā
+        self.qr_code_frame_coords = None  # (x1, y1, x2, y2) koordinātas QR koda rāmim attēla oriģinālajās koordinātās
+        self.qr_code_start_drag_x = None  # Sākuma X koordināta vilkšanas laikā
+        self.qr_code_start_drag_y = None  # Sākuma Y koordināta vilkšanas laikā
+        self.qr_code_drag_mode = None  # 'move' vai 'resize'
 
     def open_fullscreen_preview(self):
         """Atver pašreizējo attēlu pilnekrāna priekšskatījuma logā."""
@@ -3989,18 +9898,21 @@ class OCRPDFApp(ttk.Window):
                     full_text_lines.append(" ".join(current_line))
 
                 full_text = "\n".join(full_text_lines)
+                is_empty_ocr = (full_text.strip() == "")  # Pārbauda, vai OCR rezultāts ir tukšs
+
+                is_empty_ocr = (full_text.strip() == "")  # Pārbauda, vai OCR rezultāts ir tukšs
+
                 self.ocr_results[i] = {
                     "full_text": full_text,
                     "word_data": processed_words,
-                    "doc_id": str(uuid.uuid4())[:8].upper()  # Pievieno doc_id OCR rezultātiem
+                    "doc_id": str(uuid.uuid4())[:8].upper(),
+                    "is_empty_ocr": is_empty_ocr  # Pievieno jaunu lauku
                 }
                 self.after(0, self.update_ocr_text, i)
-                # Aizstāt ar šo kodu
                 if hasattr(self, '_mark_file_as_processed'):
                     self.after(0, lambda: self._mark_file_as_processed(i))
                 else:
                     print(f"Apstrādāts fails {i}")
-                    # Šeit varat pievienot failu apstrādes loģiku
 
 
 
@@ -4125,17 +10037,45 @@ class OCRPDFApp(ttk.Window):
 
     def save_pdf(self, auto_save=False):
         """Saglabā apstrādātos attēlus kā PDF failu ar meklējamu tekstu."""
-        if not any(res is not None and res["word_data"] for res in self.ocr_results):
-            messagebox.showwarning("Nav datu", "Nav neviens OCR rezultāts ar atpazītu tekstu saglabāšanai!")
+        # Pārbauda, vai ir kādi rezultāti (arī tukši OCR rezultāti ir derīgi saglabāšanai)
+        if not any(res is not None for res in self.ocr_results):
+            messagebox.showwarning("Nav datu", "Nav neviena apstrādāta attēla saglabāšanai!")
             return
+
+        # Pārbauda, vai visi rezultāti ir tukši
+        all_empty = all(
+            res is None or (not res["word_data"] and res.get("is_empty_ocr", False))
+            for res in self.ocr_results
+        )
+
+        if all_empty:
+            # Ja visi ir tukši, joprojām ļauj saglabāt, bet brīdina
+            result = messagebox.askyesno("Tukši OCR rezultāti",
+                                         "Nevienam attēlam nav atrasts teksts. Vai vēlaties saglabāt tukšu PDF?")
+            if not result:
+                return
 
         # Ģenerē unikālu dokumenta ID
         doc_id = str(uuid.uuid4())[:8].upper()  # Īss, unikāls ID
-        current_date = datetime.datetime.now().strftime("%Y-%m-%d")
+        current_date = datetime.now().strftime("%Y-%m-%d")
 
         # Klasificē dokumentu un iegūst ieteikto mapi
         first_ocr_text = self.ocr_results[0]["full_text"] if self.ocr_results and self.ocr_results[0] else ""
         document_category, is_sensitive = self.classify_document(first_ocr_text)
+
+        # Pārbauda, vai ir attēli bez OCR rezultātiem
+        has_empty_ocr = any(
+            self.ocr_results[i] and self.ocr_results[i].get("is_empty_ocr", False)
+            for i in range(len(self.ocr_results))
+            if self.ocr_results[i] is not None
+        )
+
+        # Ja ir tukši OCR rezultāti, iesaka "Bez OCR" mapi
+        if has_empty_ocr:
+            document_category = "Bez OCR"
+            if not auto_save:
+                messagebox.showinfo("Informācija",
+                                    "Dažiem attēliem nav atrasts teksts. Tie tiks saglabāti mapē 'Bez OCR'.")
 
         # --- JAUNS KODS SĀKAS ŠEIT ---
         # Pirms saglabāšanas dialoga, piedāvā izvēlēties mapi
@@ -4242,9 +10182,10 @@ class OCRPDFApp(ttk.Window):
                     c.drawText(text_obj)
 
             # Pievieno QR kodu vai svītrkodu ar dokumenta ID, ja iestatīts
-            if self.settings.get("add_id_code_to_pdf", False):
+            # JAUNS: Pievieno QR kodu vai svītrkodu ar dokumenta ID, ja iestatīts un rāmis ir definēts
+            if self.settings.get("add_id_code_to_pdf", False) and self.qr_code_frame_coords:
                 id_code_type = self.settings.get("id_code_type", "QR")
-                id_code_position = self.settings.get("id_code_position", "bottom_right")
+                # id_code_position vairs netiek izmantots tieši, jo pozīciju nosaka qr_code_frame_coords
 
                 # Pārbauda, vai ir pieejams doc_id
                 current_doc_id = self.ocr_results[i]["doc_id"] if self.ocr_results[i] else None
@@ -4265,23 +10206,20 @@ class OCRPDFApp(ttk.Window):
                                 from barcode import Code128
                                 from barcode.writer import ImageWriter
 
-                                # Izveido pilnu faila ceļu pie temp direktorija, lai izvairītos no pieejas tiesību problēmām
                                 temp_dir = tempfile.gettempdir()
                                 temp_code_path = os.path.join(temp_dir, f"temp_barcode_{i}.png")
 
-                                # Izveido barcode ar pilno ceļu un nodrošina, ka fails ir aizvērts pēc saglabāšanas
                                 with open(temp_code_path, 'wb') as f:
                                     Code128(current_doc_id, writer=ImageWriter()).write(f)
 
-                                # Pārliecinās, ka fails eksistē un ir nolasāms pirms mēģinājuma to lasīt
                                 if os.path.exists(temp_code_path):
                                     code_reader = ImageReader(temp_code_path)
                                 else:
                                     print(f"Nevarēja atrast ģenerēto svītrkoda failu: {temp_code_path}")
-                                    continue  # Pārtrauc šī koda pievienošanu, ja fails nav atrasts
+                                    continue
                             except Exception as e:
                                 print(f"Svītrkoda ģenerēšanas kļūda: {e}")
-                                continue  # Pārtrauc šī koda pievienošanu kļūdas gadījumā
+                                continue
                         elif id_code_type == "Code39":
                             try:
                                 from barcode import Code39
@@ -4304,10 +10242,6 @@ class OCRPDFApp(ttk.Window):
                                 from barcode.writer import ImageWriter
                                 temp_dir = tempfile.tempdir
                                 temp_code_path = os.path.join(temp_dir, f"temp_ean13_{i}.png")
-                                # EAN-13 prasa 12 ciparus, lai ģenerētu 13. pārbaudes ciparu
-                                # Ja current_doc_id nav ciparu virkne vai nav pareizā garumā, tas var izraisīt kļūdu
-                                # Šeit ir jābūt loģikai, kas nodrošina derīgu EAN-13 ievadi
-                                # Vienkāršības labad pieņemam, ka current_doc_id ir derīgs 12 ciparu virkne
                                 if len(current_doc_id) >= 12 and current_doc_id.isdigit():
                                     with open(temp_code_path, 'wb') as f:
                                         EAN13(current_doc_id[:12], writer=ImageWriter()).write(f)
@@ -4324,30 +10258,25 @@ class OCRPDFApp(ttk.Window):
                                 continue
 
                         if code_reader:
-                            # Dinamiski pielāgo koda izmēru, pamatojoties uz lapas izmēru
-                            code_max_size = min(page_width, page_height) * 0.15  # Max 15% no mazākās lapas puses
-                            code_size = min(0.75 * inch,
-                                            code_max_size)  # Noklusējums 0.75 collas, bet ne lielāks par 15%
+                            # Izmanto interaktīvi iestatītās koordinātas
+                            x1_img, y1_img, x2_img, y2_img = self.qr_code_frame_coords
 
-                            margin = 0.2 * inch  # Marža no malas
+                            # Pārrēķina koordinātas no attēla pikseļiem uz PDF punktiem
+                            # Jāņem vērā, ka PDF lapas izmērs var atšķirties no attēla izmēra
+                            # un attēls uz PDF lapas var būt mērogots un centrēts.
+                            # Tāpēc ir jāizmanto tie paši mērogošanas faktori un nobīdes, kas tika izmantoti attēla zīmēšanai.
 
-                            if id_code_position == "top_right":
-                                code_x_pos = page_width - code_size - margin
-                                code_y_pos = page_height - code_size - margin
-                            elif id_code_position == "bottom_right":
-                                code_x_pos = page_width - code_size - margin
-                                code_y_pos = margin
-                            elif id_code_position == "bottom_left":
-                                code_x_pos = margin
-                                code_y_pos = margin
-                            elif id_code_position == "top_left":
-                                code_x_pos = margin
-                                code_y_pos = page_height - code_size - margin
-                            else:  # Noklusējums
-                                code_x_pos = page_width - code_size - margin
-                                code_y_pos = margin
+                            # Mērogošanas faktori no oriģinālā attēla uz PDF lapas attēlojumu
+                            scale_x_img_to_pdf = draw_width / img_width
+                            scale_y_img_to_pdf = draw_height / img_height
 
-                            c.drawImage(code_reader, code_x_pos, code_y_pos, width=code_size, height=code_size)
+                            # QR koda rāmja koordinātas PDF lapas koordinātās
+                            code_x_pos = x_offset + x1_img * scale_x_img_to_pdf
+                            code_y_pos = y_offset + (img_height - y2_img) * scale_y_img_to_pdf  # Y ass ir apgriezta
+                            code_width = (x2_img - x1_img) * scale_x_img_to_pdf
+                            code_height = (y2_img - y1_img) * scale_y_img_to_pdf
+
+                            c.drawImage(code_reader, code_x_pos, code_y_pos, width=code_width, height=code_height)
                             os.remove(temp_code_path)  # Dzēš pagaidu failu
                     except ImportError:
                         messagebox.showwarning("Trūkst bibliotēkas",
@@ -4398,7 +10327,7 @@ class OCRPDFApp(ttk.Window):
             "name": os.path.basename(out_path),
             "filepath": out_path,
             "doc_id": doc_id,
-            "date": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "parent": target_folder_node  # Svarīgi atjaunināt parent atsauci
         })
         self.refresh_pdf_list()  # Atjauno failu sarakstu failu pārvaldības cilnē
@@ -5362,11 +11291,11 @@ class OCRPDFApp(ttk.Window):
         path = filedialog.askdirectory(title="Izvēlieties mapi automātiskai skenēšanai")
         if path:
             self.scan_folder_path.set(path)
-            self.settings["scan_folder_path"] = path # Uzreiz saglabā iestatījumos
+            self.settings["scan_folder_path"] = path  # Uzreiz saglabā iestatījumos
             self.save_app_settings()
             if self.auto_scan_enabled.get():
                 self.stop_auto_scan()
-                self.start_auto_scan() # Restartē uzraudzību ar jauno mapi
+                self.start_auto_scan()  # Restartē uzraudzību ar jauno mapi
 
     def toggle_auto_scan(self):
         """Ieslēdz vai izslēdz automātisko skenēšanu."""
@@ -5375,7 +11304,7 @@ class OCRPDFApp(ttk.Window):
         else:
             self.stop_auto_scan()
         self.update_auto_scan_status()
-        self.settings["auto_scan_enabled"] = self.auto_scan_enabled.get() # Uzreiz saglabā iestatījumos
+        self.settings["auto_scan_enabled"] = self.auto_scan_enabled.get()  # Uzreiz saglabā iestatījumos
         self.save_app_settings()
 
     def update_remote_storage_fields(self, event=None):
@@ -5697,7 +11626,8 @@ class OCRPDFApp(ttk.Window):
     def update_auto_scan_status(self):
         """Atjaunina automātiskās skenēšanas statusa etiķeti."""
         if self.auto_scan_enabled.get():
-            self.auto_scan_status_label.config(text=f"Statuss: Ieslēgts (Uzrauga: {self.scan_folder_path.get()})", bootstyle="success")
+            self.auto_scan_status_label.config(text=f"Statuss: Ieslēgts (Uzrauga: {self.scan_folder_path.get()})",
+                                               bootstyle="success")
         else:
             self.auto_scan_status_label.config(text="Statuss: Izslēgts", bootstyle="info")
 
@@ -5714,7 +11644,7 @@ class OCRPDFApp(ttk.Window):
 
         event_handler = ScanEventHandler(self)
         self.observer = Observer()
-        self.observer.schedule(event_handler, scan_path, recursive=False) # Uzrauga tikai tiešos failus mapē
+        self.observer.schedule(event_handler, scan_path, recursive=False)  # Uzrauga tikai tiešos failus mapē
         self.observer.start()
         print(f"Automātiskā skenēšana sākta mapē: {scan_path}")
         self.update_auto_scan_status()
@@ -5737,7 +11667,7 @@ class OCRPDFApp(ttk.Window):
 
         # Pagaida, kamēr fails ir pilnībā uzrakstīts (īpaši svarīgi lieliem failiem)
         size_before = -1
-        for _ in range(10): # Mēģina 10 reizes ar 0.5s intervālu
+        for _ in range(10):  # Mēģina 10 reizes ar 0.5s intervālu
             current_size = os.path.getsize(filepath)
             if current_size == size_before:
                 break
@@ -5754,32 +11684,33 @@ class OCRPDFApp(ttk.Window):
             self.after(100, lambda: self._process_image_for_auto_scan(filepath))
         else:
             print(f"Neatbalstīts faila tips automātiskai apstrādei: {filepath}")
-            self.after(100, lambda: messagebox.showwarning("Automātiskā skenēšana", f"Neatbalstīts faila tips: {os.path.basename(filepath)}"))
+            self.after(100, lambda: messagebox.showwarning("Automātiskā skenēšana",
+                                                           f"Neatbalstīts faila tips: {os.path.basename(filepath)}"))
             self.after(0, self.refresh_scanned_docs_list)  # Atjaunina sarakstu pēc apstrādes
-
 
     def _process_image_for_auto_scan(self, filepath):
         """Ielādē un apstrādā attēlu automātiskai skenēšanai."""
         try:
             img = Image.open(filepath)
-            self.clear_files() # Notīra iepriekšējos attēlus
+            self.clear_files()  # Notīra iepriekšējos attēlus
             self.images.append({"filepath": filepath, "original_img": img.copy(), "processed_img": img.copy()})
             self.file_listbox.insert(tk.END, os.path.basename(filepath))
             self.file_listbox.select_set(0)
             self.on_file_select()
-            self._camera_scan_in_progress = True # Izmanto to pašu karogu, lai automātiski saglabātu PDF
+            self._camera_scan_in_progress = True  # Izmanto to pašu karogu, lai automātiski saglabātu PDF
             self.start_processing()
         except Exception as e:
-            messagebox.showerror("Automātiskā skenēšana", f"Neizdevās apstrādāt attēlu {os.path.basename(filepath)}: {e}")
+            messagebox.showerror("Automātiskā skenēšana",
+                                 f"Neizdevās apstrādāt attēlu {os.path.basename(filepath)}: {e}")
 
     def _process_pdf_for_auto_scan(self, filepath):
         """Ielādē un apstrādā PDF automātiskai skenēšanai."""
         try:
             doc = PDFEditor.open(filepath)
-            self.clear_files() # Notīra iepriekšējos attēlus
+            self.clear_files()  # Notīra iepriekšējos attēlus
             for page_num in range(doc.page_count):
                 page = doc.load_page(page_num)
-                pix = page.get_pixmap(dpi=self.dpi_var.get()) # Izmanto iestatīto DPI
+                pix = page.get_pixmap(dpi=self.dpi_var.get())  # Izmanto iestatīto DPI
                 img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
                 self.images.append({"filepath": filepath, "original_img": img.copy(), "processed_img": img.copy()})
                 self.file_listbox.insert(tk.END, f"{os.path.basename(filepath)} (Lapa {page_num + 1})")
@@ -5788,21 +11719,671 @@ class OCRPDFApp(ttk.Window):
             if self.images:
                 self.file_listbox.select_set(0)
                 self.on_file_select()
-                self._camera_scan_in_progress = True # Izmanto to pašu karogu, lai automātiski saglabātu PDF
+                self._camera_scan_in_progress = True  # Izmanto to pašu karogu, lai automātiski saglabātu PDF
                 self.start_processing()
             else:
-                messagebox.showwarning("Automātiskā skenēšana", f"PDF dokuments {os.path.basename(filepath)} nesatur attēlus vai lapas.")
+                messagebox.showwarning("Automātiskā skenēšana",
+                                       f"PDF dokuments {os.path.basename(filepath)} nesatur attēlus vai lapas.")
         except Exception as e:
             messagebox.showerror("Automātiskā skenēšana", f"Neizdevās apstrādāt PDF {os.path.basename(filepath)}: {e}")
 
+    def show_scan_settings(self, parent_window):
+        """Parāda skenēšanas iestatījumu logu."""
+        settings_window = Toplevel(parent_window)
+        settings_window.title("Detekcijas iestatījumi")
+        settings_window.geometry("520x650")
+        settings_window.transient(parent_window)
+        settings_window.grab_set()
+
+        # Galvenais konteiners
+        main_container = ttk.Frame(settings_window)
+        main_container.pack(fill="both", expand=True, padx=10, pady=10)
+
+        # Scrollable canvas un scrollbar
+        canvas = tk.Canvas(main_container, highlightthickness=0)
+        scrollbar = ttk.Scrollbar(main_container, orient="vertical", command=canvas.yview)
+        scrollable_frame = ttk.Frame(canvas)
+
+        # Konfigurē scroll reģionu
+        def configure_scroll_region(event):
+            canvas.configure(scrollregion=canvas.bbox("all"))
+
+        scrollable_frame.bind("<Configure>", configure_scroll_region)
+
+        # Pievieno scrollable_frame uz canvas
+        canvas_frame = canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+
+        # Konfigurē canvas izmēru
+        def configure_canvas(event):
+            canvas.itemconfig(canvas_frame, width=event.width)
+
+        canvas.bind('<Configure>', configure_canvas)
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        # Peles rullīša atbalsts ar drošības pārbaudēm
+        def on_mousewheel(event):
+            try:
+                if canvas.winfo_exists():
+                    canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+            except tk.TclError:
+                # Canvas ir iznīcināts, atceļam notikumu
+                pass
+
+        def bind_mousewheel(event):
+            try:
+                if canvas.winfo_exists():
+                    canvas.bind_all("<MouseWheel>", on_mousewheel)
+            except tk.TclError:
+                pass
+
+        def unbind_mousewheel(event):
+            try:
+                canvas.unbind_all("<MouseWheel>")
+            except tk.TclError:
+                pass
+
+        def on_window_destroy():
+            """Notīra notikumus, kad logs tiek aizvērts."""
+            try:
+                canvas.unbind_all("<MouseWheel>")
+            except:
+                pass
+            settings_window.destroy()
+
+        # Piesaista notikumus
+        canvas.bind('<Enter>', bind_mousewheel)
+        canvas.bind('<Leave>', unbind_mousewheel)
+
+        # Nodrošina, ka peles rullīša notikumi tiek atcelti, kad logs aizveras
+        settings_window.protocol("WM_DELETE_WINDOW", on_window_destroy)
+
+        # Iestatījumu saturs
+        content_frame = ttk.Frame(scrollable_frame, padding="10")
+        content_frame.pack(fill="both", expand=True)
+
+        # Virsraksts
+        title_label = ttk.Label(content_frame, text="Dokumenta detekcijas iestatījumi",
+                                font=("Arial", 14, "bold"))
+        title_label.pack(pady=(0, 20))
+
+        # Gausa izplūšana
+        blur_frame = ttk.LabelFrame(content_frame, text="Gausa izplūšana", padding="15")
+        blur_frame.pack(fill="x", pady=8)
+
+        ttk.Label(blur_frame, text="Kodola izmērs (nepāra skaitlis):").pack(anchor="w")
+        blur_scale = ttk.Scale(blur_frame, from_=1, to=15, variable=self.scan_gaussian_blur_kernel,
+                               orient="horizontal")
+        blur_scale.pack(fill="x", pady=5)
+        blur_value_label = ttk.Label(blur_frame, textvariable=self.scan_gaussian_blur_kernel)
+        blur_value_label.pack(anchor="w")
+
+        # Adaptīvā sliekšņošana
+        thresh_frame = ttk.LabelFrame(content_frame, text="Adaptīvā sliekšņošana", padding="15")
+        thresh_frame.pack(fill="x", pady=8)
+
+        ttk.Label(thresh_frame, text="Bloka izmērs (nepāra skaitlis):").pack(anchor="w")
+        block_scale = ttk.Scale(thresh_frame, from_=3, to=31, variable=self.scan_adaptive_thresh_block_size,
+                                orient="horizontal")
+        block_scale.pack(fill="x", pady=5)
+        block_value_label = ttk.Label(thresh_frame, textvariable=self.scan_adaptive_thresh_block_size)
+        block_value_label.pack(anchor="w")
+
+        ttk.Label(thresh_frame, text="C konstante:").pack(anchor="w", pady=(10, 0))
+        c_scale = ttk.Scale(thresh_frame, from_=0, to=20, variable=self.scan_adaptive_thresh_c,
+                            orient="horizontal")
+        c_scale.pack(fill="x", pady=5)
+        c_value_label = ttk.Label(thresh_frame, textvariable=self.scan_adaptive_thresh_c)
+        c_value_label.pack(anchor="w")
+
+        # Canny malu detekcija
+        canny_frame = ttk.LabelFrame(content_frame, text="Canny malu detekcija", padding="15")
+        canny_frame.pack(fill="x", pady=8)
+
+        ttk.Label(canny_frame, text="Zemākais slieksnis:").pack(anchor="w")
+        canny1_scale = ttk.Scale(canny_frame, from_=10, to=200, variable=self.scan_canny_thresh1,
+                                 orient="horizontal")
+        canny1_scale.pack(fill="x", pady=5)
+        canny1_value_label = ttk.Label(canny_frame, textvariable=self.scan_canny_thresh1)
+        canny1_value_label.pack(anchor="w")
+
+        ttk.Label(canny_frame, text="Augstākais slieksnis:").pack(anchor="w", pady=(10, 0))
+        canny2_scale = ttk.Scale(canny_frame, from_=50, to=300, variable=self.scan_canny_thresh2,
+                                 orient="horizontal")
+        canny2_scale.pack(fill="x", pady=5)
+        canny2_value_label = ttk.Label(canny_frame, textvariable=self.scan_canny_thresh2)
+        canny2_value_label.pack(anchor="w")
+
+        # Kontūru filtrēšana
+        contour_frame = ttk.LabelFrame(content_frame, text="Kontūru filtrēšana", padding="15")
+        contour_frame.pack(fill="x", pady=8)
+
+        ttk.Label(contour_frame, text="Minimālais kontūras laukums:").pack(anchor="w")
+        area_scale = ttk.Scale(contour_frame, from_=1000, to=50000, variable=self.scan_min_contour_area,
+                               orient="horizontal")
+        area_scale.pack(fill="x", pady=5)
+        area_value_label = ttk.Label(contour_frame, textvariable=self.scan_min_contour_area)
+        area_value_label.pack(anchor="w")
+
+        ttk.Label(contour_frame, text="Min aspekta attiecība:").pack(anchor="w", pady=(10, 0))
+        ratio_min_scale = ttk.Scale(contour_frame, from_=0.1, to=2.0, variable=self.scan_aspect_ratio_min,
+                                    orient="horizontal")
+        ratio_min_scale.pack(fill="x", pady=5)
+        ratio_min_value_label = ttk.Label(contour_frame, textvariable=self.scan_aspect_ratio_min)
+        ratio_min_value_label.pack(anchor="w")
+
+        ttk.Label(contour_frame, text="Max aspekta attiecība:").pack(anchor="w", pady=(10, 0))
+        ratio_max_scale = ttk.Scale(contour_frame, from_=1.0, to=5.0, variable=self.scan_aspect_ratio_max,
+                                    orient="horizontal")
+        ratio_max_scale.pack(fill="x", pady=5)
+        ratio_max_value_label = ttk.Label(contour_frame, textvariable=self.scan_aspect_ratio_max)
+        ratio_max_value_label.pack(anchor="w")
+
+        # Pogas
+        button_frame = ttk.Frame(content_frame)
+        button_frame.pack(fill="x", pady=20)
+
+        ttk.Button(button_frame, text="Atiestatīt uz noklusējumu",
+                   command=self.reset_scan_settings, bootstyle="warning").pack(side="left", padx=5)
+        ttk.Button(button_frame, text="Aizvērt",
+                   command=on_window_destroy, bootstyle="secondary").pack(side="right", padx=5)
+
+        # Ievieto canvas un scrollbar galvenajā konteinera
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+
+        # Fokusē uz logu
+        settings_window.focus_set()
+
+    def reset_scan_settings(self):
+        """Atiestatīt skenēšanas iestatījumus uz noklusējuma vērtībām."""
+        # Esošie iestatījumi
+        self.scan_gaussian_blur_kernel.set(5)
+        self.scan_adaptive_thresh_block_size.set(11)
+        self.scan_adaptive_thresh_c.set(2)
+        self.scan_canny_thresh1.set(50)
+        self.scan_canny_thresh2.set(150)
+        self.scan_min_contour_area.set(10000)
+        self.scan_aspect_ratio_min.set(0.3)
+        self.scan_aspect_ratio_max.set(3.0)
+
+        # PIEVIENOJIET ŠĪSRINDAS:
+        # Jaunie iestatījumi
+        self.scan_brightness.set(0)
+        self.scan_contrast.set(0)
+        self.scan_saturation.set(0)
+        self.scan_gamma.set(1.0)
+        self.scan_use_color_detection.set(False)
+        self.scan_target_color.set("#FFFFFF")
+        self.scan_color_tolerance.set(30)
+        self.scan_morphology_enabled.set(False)
+        self.scan_morphology_kernel_size.set(3)
+        self.scan_edge_dilation.set(2)
+
+    def show_document_detection_menu(self):
+        """Parāda dokumentu detekcijas izvēlni."""
+        if self.current_image_index == -1:
+            messagebox.showwarning("Nav attēla", "Lūdzu, vispirms atlasiet attēlu, ko apstrādāt.")
+            return
+
+        # Izveidojam izvēlnes logu
+        menu_window = Toplevel(self)
+        menu_window.title("Dokumenta detekcijas izvēlne")
+        menu_window.geometry("500x400")
+        menu_window.transient(self)
+        menu_window.grab_set()
+
+        # Galvenais frame
+        main_frame = ttk.Frame(menu_window, padding="20")
+        main_frame.pack(fill="both", expand=True)
+
+        # Virsraksts
+        title_label = ttk.Label(main_frame, text="Izvēlieties dokumenta detekcijas veidu:",
+                                font=("Arial", 12, "bold"))
+        title_label.pack(pady=(0, 20))
+
+        # Automātiskās detekcijas poga
+        auto_btn = ttk.Button(main_frame,
+                              text="🤖 Automātiskā detekcija",
+                              command=lambda: self.start_document_detection(menu_window, auto=True),
+                              bootstyle="success",
+                              width=30)
+        auto_btn.pack(pady=5, fill="x")
+
+        auto_desc = ttk.Label(main_frame,
+                              text="Programma automātiski mēģinās atrast dokumenta robežas",
+                              font=("Arial", 9),
+                              foreground="gray")
+        auto_desc.pack(pady=(0, 15))
+
+        # Manuālās detekcijas poga
+        manual_btn = ttk.Button(main_frame,
+                                text="✋ Manuālā atlase",
+                                command=lambda: self.start_document_detection(menu_window, auto=False),
+                                bootstyle="warning",
+                                width=30)
+        manual_btn.pack(pady=5, fill="x")
+
+        manual_desc = ttk.Label(main_frame,
+                                text="Jūs paši varēsiet izvēlēties dokumenta stūrus",
+                                font=("Arial", 9),
+                                foreground="gray")
+        manual_desc.pack(pady=(0, 15))
+
+        # Iestatījumu poga
+        settings_btn = ttk.Button(main_frame,
+                                  text="⚙️ Detekcijas iestatījumi",
+                                  command=lambda: self.show_scan_settings(menu_window),
+                                  bootstyle="info",
+                                  width=30)
+        settings_btn.pack(pady=5, fill="x")
+
+        settings_desc = ttk.Label(main_frame,
+                                  text="Pielāgojiet automātiskās detekcijas parametrus",
+                                  font=("Arial", 9),
+                                  foreground="gray")
+        settings_desc.pack(pady=(0, 20))
+
+        # Atcelt poga
+        cancel_btn = ttk.Button(main_frame,
+                                text="Atcelt",
+                                command=menu_window.destroy,
+                                bootstyle="secondary",
+                                width=30)
+        cancel_btn.pack(pady=10, fill="x")
+
+    def start_document_detection(self, menu_window, auto=True):
+        """Sāk dokumenta detekciju ar izvēlēto metodi."""
+        menu_window.destroy()
+
+        current_image_pil = self.images[self.current_image_index]["processed_img"]
+        self.document_scanner.set_image(current_image_pil)
+
+        if auto:
+            # Automātiskā detekcija
+            self.document_scanner.show_document_detection_preview()
+        else:
+            # Manuālā atlase - sāk ar tukšiem stūriem
+            self.document_scanner.corners = []
+            self.document_scanner.show_document_detection_preview()
+
+    def enhance_document_detection(self, img_cv):
+        """Uzlabo attēlu dokumenta atpazīšanai."""
+        gray = cv2.cvtColor(img_cv, cv2.COLOR_RGB2GRAY)
+
+        # Adaptīvs kontrasta uzlabojums
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        enhanced = clahe.apply(gray)
+
+        # Gausa izplūšana
+        blurred = cv2.GaussianBlur(enhanced, (5, 5), 0)
+
+        return blurred
+
+    def auto_detect_document(self):
+        """Automātiski atpazīst dokumentu attēlā ar uzlabotu algoritmu dažādiem apstākļiem."""
+        if not OPENCV_AVAILABLE:
+            messagebox.showwarning("Trūkst bibliotēkas",
+                                   "Dokumentu atpazīšanai nepieciešams 'opencv-python'.")
+            return
+
+        if self.current_image_index == -1:
+            messagebox.showwarning("Nav attēla", "Lūdzu, vispirms atlasiet attēlu, lai noteiktu dokumentu.")
+            return
+
+        try:
+            img_data = self.images[self.current_image_index]
+            img_pil = img_data["processed_img"]
+            img_cv = np.array(img_pil.convert('RGB'))
+            original_height, original_width = img_cv.shape[:2]
+
+            # Vairāki mēģinājumi ar dažādiem parametriem
+            document_contour = None
+
+            # 1. mēģinājums: Standarta pieeja
+            document_contour = self._try_detect_document_method1(img_cv)
+
+            # 2. mēģinājums: Canny edge detection
+            if document_contour is None:
+                document_contour = self._try_detect_document_method2(img_cv)
+
+            # 3. mēģinājums: Morfoloģiskās operācijas
+            if document_contour is None:
+                document_contour = self._try_detect_document_method3(img_cv)
+
+            # 4. mēģinājums: Krāsu segmentācija
+            if document_contour is None:
+                document_contour = self._try_detect_document_method4(img_cv)
+
+            if document_contour is None:
+                messagebox.showwarning("Dokumenta noteikšana",
+                                       "Neizdevās automātiski noteikt dokumenta kontūru ar nevenu metodi.\n"
+                                       "Ieteikumi:\n"
+                                       "• Pārliecinieties, ka dokuments ir skaidri redzams\n"
+                                       "• Mēģiniet uzlabot attēla kontrastu\n"
+                                       "• Izmantojiet manuālo atlasi")
+                return
+
+            # Pielieto perspektīvas transformāciju
+            processed_img_pil = self._apply_perspective_transform(img_cv, document_contour)
+
+            if processed_img_pil:
+                img_data["processed_img"] = processed_img_pil
+                self.show_image_preview(processed_img_pil)
+                messagebox.showinfo("Dokumenta noteikšana", "Dokuments veiksmīgi noteikts un koriģēts.")
+            else:
+                messagebox.showwarning("Dokumenta noteikšana", "Neizdevās veikt perspektīvas korekciju.")
+
+        except Exception as e:
+            messagebox.showerror("Kļūda dokumenta noteikšanā", f"Neizdevās automātiski noteikt dokumentu: {e}")
+
+    def _try_detect_document_method1(self, img_cv):
+        """1. metode: Uzlabota adaptīvā sliekšņošana"""
+        try:
+            gray = cv2.cvtColor(img_cv, cv2.COLOR_RGB2GRAY)
+
+            # Uzlabo kontrastu
+            clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
+            enhanced = clahe.apply(gray)
+
+            # Gausa izplūšana
+            blurred = cv2.GaussianBlur(enhanced, (5, 5), 0)
+
+            # Adaptīvā sliekšņošana ar dažādiem parametriem
+            for block_size in [11, 15, 19, 23]:
+                for c_value in [2, 5, 10]:
+                    thresh = cv2.adaptiveThreshold(blurred, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                                                   cv2.THRESH_BINARY, block_size, c_value)
+
+                    contour = self._find_best_contour(thresh, img_cv.shape)
+                    if contour is not None:
+                        return contour
+
+            return None
+        except:
+            return None
+
+    def _try_detect_document_method2(self, img_cv):
+        """2. metode: Canny edge detection"""
+        try:
+            gray = cv2.cvtColor(img_cv, cv2.COLOR_RGB2GRAY)
+
+            # Uzlabo kontrastu
+            clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+            enhanced = clahe.apply(gray)
+
+            # Gausa izplūšana
+            blurred = cv2.GaussianBlur(enhanced, (5, 5), 0)
+
+            # Canny edge detection ar dažādiem sliekšņiem
+            for low_thresh in [50, 75, 100]:
+                for high_thresh in [150, 200, 250]:
+                    edges = cv2.Canny(blurred, low_thresh, high_thresh)
+
+                    # Morfoloģiskās operācijas, lai aizvērtu pārtraukumus
+                    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+                    edges = cv2.morphologyEx(edges, cv2.MORPH_CLOSE, kernel)
+
+                    contour = self._find_best_contour(edges, img_cv.shape)
+                    if contour is not None:
+                        return contour
+
+            return None
+        except:
+            return None
+
+    def _try_detect_document_method3(self, img_cv):
+        """3. metode: Morfoloģiskās operācijas"""
+        try:
+            gray = cv2.cvtColor(img_cv, cv2.COLOR_RGB2GRAY)
+
+            # Binārizācija ar Otsu metodi
+            _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+
+            # Morfoloģiskās operācijas
+            kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
+
+            # Closing - aizvērt mazos caurums
+            closed = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel, iterations=2)
+
+            # Opening - noņemt troksni
+            opened = cv2.morphologyEx(closed, cv2.MORPH_OPEN, kernel, iterations=1)
+
+            contour = self._find_best_contour(opened, img_cv.shape)
+            if contour is not None:
+                return contour
+
+            # Mēģinam ar invertētu attēlu
+            inverted = cv2.bitwise_not(opened)
+            contour = self._find_best_contour(inverted, img_cv.shape)
+            return contour
+
+        except:
+            return None
+
+    def _try_detect_document_method4(self, img_cv):
+        """4. metode: Krāsu segmentācija"""
+        try:
+            # Konvertē uz HSV krāsu telpu
+            hsv = cv2.cvtColor(img_cv, cv2.COLOR_RGB2HSV)
+
+            # Definē baltās krāsas diapazonu (dokumenti bieži ir balti)
+            lower_white = np.array([0, 0, 180])
+            upper_white = np.array([180, 30, 255])
+
+            # Izveido masku baltajām krāsām
+            white_mask = cv2.inRange(hsv, lower_white, upper_white)
+
+            # Morfoloģiskās operācijas
+            kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
+            white_mask = cv2.morphologyEx(white_mask, cv2.MORPH_CLOSE, kernel, iterations=2)
+            white_mask = cv2.morphologyEx(white_mask, cv2.MORPH_OPEN, kernel, iterations=1)
+
+            contour = self._find_best_contour(white_mask, img_cv.shape)
+            if contour is not None:
+                return contour
+
+            # Mēģinam ar plašāku krāsu diapazonu
+            lower_light = np.array([0, 0, 120])
+            upper_light = np.array([180, 50, 255])
+            light_mask = cv2.inRange(hsv, lower_light, upper_light)
+
+            light_mask = cv2.morphologyEx(light_mask, cv2.MORPH_CLOSE, kernel, iterations=2)
+            contour = self._find_best_contour(light_mask, img_cv.shape)
+            return contour
+
+        except:
+            return None
+
+    def _find_best_contour(self, binary_img, img_shape):
+        """Atrod labāko kontūru, kas varētu būt dokuments"""
+        try:
+            contours, _ = cv2.findContours(binary_img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+            if not contours:
+                return None
+
+            img_area = img_shape[0] * img_shape[1]
+
+            # Sakārto kontūras pēc laukuma
+            contours = sorted(contours, key=cv2.contourArea, reverse=True)
+
+            for contour in contours:
+                area = cv2.contourArea(contour)
+
+                # Pārbauda minimālo laukumu (vismaz 5% no attēla)
+                if area < img_area * 0.05:
+                    continue
+
+                # Pārbauda maksimālo laukumu (ne vairāk kā 95% no attēla)
+                if area > img_area * 0.95:
+                    continue
+
+                # Aproksimē kontūru
+                peri = cv2.arcLength(contour, True)
+
+                # Mēģina ar dažādiem epsilon parametriem
+                for epsilon_factor in [0.01, 0.02, 0.03, 0.04, 0.05]:
+                    approx = cv2.approxPolyDP(contour, epsilon_factor * peri, True)
+
+                    # Ja ir 4 stūri
+                    if len(approx) == 4:
+                        # Pārbauda, vai stūri veido saprātīgu taisnstūri
+                        if self._is_valid_rectangle(approx, img_shape):
+                            return approx
+
+                    # Ja ir vairāk nekā 4 stūri, mēģina atrast 4 galvenos
+                    elif len(approx) > 4:
+                        # Atrod 4 galvenos stūrus
+                        rect_corners = self._find_four_corners(approx)
+                        if rect_corners is not None and self._is_valid_rectangle(rect_corners, img_shape):
+                            return rect_corners
+
+            return None
+        except:
+            return None
+
+    def _is_valid_rectangle(self, corners, img_shape):
+        """Pārbauda, vai 4 punkti veido derīgu taisnstūri"""
+        try:
+            if len(corners) != 4:
+                return False
+
+            # Pārbauda, vai visi punkti ir attēla robežās
+            h, w = img_shape[:2]
+            for corner in corners:
+                x, y = corner[0]
+                if x < 0 or x >= w or y < 0 or y >= h:
+                    return False
+
+            # Aprēķina laukumu
+            area = cv2.contourArea(corners)
+            img_area = h * w
+
+            # Pārbauda laukuma attiecību
+            if area < img_area * 0.05 or area > img_area * 0.95:
+                return False
+
+            # Pārbauda, vai forma ir pietiekami taisnstūrveida
+            # Aprēķina convex hull un salīdzina laukumus
+            hull = cv2.convexHull(corners)
+            hull_area = cv2.contourArea(hull)
+
+            if hull_area > 0:
+                solidity = area / hull_area
+                if solidity < 0.8:  # Ja forma nav pietiekami "cieta"
+                    return False
+
+            return True
+        except:
+            return False
+
+    def _find_four_corners(self, contour):
+        """Atrod 4 galvenos stūrus no kontūras ar vairāk punktiem"""
+        try:
+            # Atrod kontūras bounding rectangle
+            rect = cv2.minAreaRect(contour)
+            box = cv2.boxPoints(rect)
+            box = np.int0(box)
+
+            return box.reshape(4, 1, 2)
+        except:
+            return None
+
+    def _apply_perspective_transform(self, img_cv, document_contour):
+        """Pielieto perspektīvas transformāciju"""
+        try:
+            def order_points(pts):
+                """Sakārto punktus: augšējais kreisais, augšējais labais, apakšējais labais, apakšējais kreisais"""
+                rect = np.zeros((4, 2), dtype="float32")
+
+                # Summa: augšējais kreisais būs mazākā, apakšējais labais - lielākā
+                s = pts.sum(axis=1)
+                rect[0] = pts[np.argmin(s)]  # Augšējais kreisais
+                rect[2] = pts[np.argmax(s)]  # Apakšējais labais
+
+                # Starpība: augšējais labais būs mazākā, apakšējais kreisais - lielākā
+                diff = np.diff(pts, axis=1)
+                rect[1] = pts[np.argmin(diff)]  # Augšējais labais
+                rect[3] = pts[np.argmax(diff)]  # Apakšējais kreisais
+
+                return rect
+
+            # Sakārto stūrus
+            corners = document_contour.reshape(4, 2)
+            ordered_corners = order_points(corners)
+
+            # Aprēķina jaunā attēla izmērus
+            (tl, tr, br, bl) = ordered_corners
+
+            # Platums
+            widthA = np.sqrt(((br[0] - bl[0]) ** 2) + ((br[1] - bl[1]) ** 2))
+            widthB = np.sqrt(((tr[0] - tl[0]) ** 2) + ((tr[1] - tl[1]) ** 2))
+            maxWidth = max(int(widthA), int(widthB))
+
+            # Augstums
+            heightA = np.sqrt(((tr[0] - br[0]) ** 2) + ((tr[1] - br[1]) ** 2))
+            heightB = np.sqrt(((tl[0] - bl[0]) ** 2) + ((tl[1] - bl[1]) ** 2))
+            maxHeight = max(int(heightA), int(heightB))
+
+            # Pārbauda, vai izmēri ir saprātīgi
+            if maxWidth < 50 or maxHeight < 50:
+                return None
+
+            if maxWidth > 5000 or maxHeight > 5000:
+                # Ierobežo maksimālos izmērus
+                ratio = min(5000 / maxWidth, 5000 / maxHeight)
+                maxWidth = int(maxWidth * ratio)
+                maxHeight = int(maxHeight * ratio)
+
+            # Definē mērķa punktus (taisnstūrveida dokuments)
+            dst = np.array([
+                [0, 0],
+                [maxWidth - 1, 0],
+                [maxWidth - 1, maxHeight - 1],
+                [0, maxHeight - 1]], dtype="float32")
+
+            # Aprēķina perspektīvas transformācijas matricu
+            M = cv2.getPerspectiveTransform(ordered_corners, dst)
+
+            # Pielieto perspektīvas transformāciju
+            warped = cv2.warpPerspective(img_cv, M, (maxWidth, maxHeight))
+
+            # Konvertē atpakaļ uz PIL attēlu
+            processed_img_pil = Image.fromarray(warped)
+
+            return processed_img_pil
+
+        except Exception as e:
+            print(f"Kļūda perspektīvas transformācijā: {e}")
+            return None
+
+    def manual_document_selection(self):
+        """Ļauj lietotājam manuāli atlasīt dokumenta apgabalu."""
+        if self.current_image_index == -1:
+            return
+
+        messagebox.showinfo("Manuāla atlase",
+                            "Izmantojiet peles kreiso pogu, lai iezīmētu dokumenta apgabalu attēla priekšskatījumā.")
+
+    def correct_document_borders(self):
+        """Koriģē dokumenta robežas."""
+        if self.current_image_index == -1:
+            return
+
+        messagebox.showinfo("Robežu korekcija",
+                            "Šī funkcija ļaus precizēt dokumenta robežas.")
 
     def on_closing(self):
         """Apstrādā loga aizvēršanas notikumu, saglabājot iestatījumus un arhīvu."""
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
         self.save_app_settings()
         self.save_scan_settings()  # JAUNS: Saglabā skenēšanas iestatījumus
-        self.stop_auto_scan() # Aptur watchdog observer
+        self.stop_auto_scan()  # Aptur watchdog observer
         self.save_pdf_archive()
+
+        if self.current_pdf_document:
+            self.current_pdf_document.close()
+            self.current_pdf_document = None
         self.destroy()
 
     # --- JAUNAS FUNKCIJAS ---
@@ -6150,18 +12731,14 @@ class OCRPDFApp(ttk.Window):
                 img_cv = cv2.cvtColor(img_cv, cv2.COLOR_RGB2BGR)
                 gray = cv2.cvtColor(img_cv, cv2.COLOR_BGR2GRAY)
 
-                # Ielādē sejas kaskādes klasifikatoru
-                # Jums būs nepieciešams `haarcascade_frontalface_default.xml` fails.
-                # To var atrast OpenCV repozitorijā:
-                # https://github.com/opencv/opencv/blob/master/data/haarcascades/haarcascade_frontalface_default.xml
-                # Ieteicams to novietot tajā pašā direktorijā, kur ir jūsu Python skripts,
-                # vai norādīt pilnu ceļu uz failu.
+                # Ielādē sejas kaskādes klasifikatoru, izmantojot relatīvo ceļu
+                # Fails atradīsies mapē "data" blakus .exe failam
+                cascade_path = resource_path(os.path.join("data", "haarcascade_frontalface_default.xml"))
 
                 # Pārbauda, vai fails eksistē
-                cascade_path = "haarcascade_frontalface_default.xml"
                 if not os.path.exists(cascade_path):
                     messagebox.showerror("Kļūda", f"Haar kaskādes klasifikators '{cascade_path}' nav atrasts.\n"
-                                                  "Lūdzu, lejupielādējiet to no OpenCV GitHub repozitorija un novietojiet blakus skriptam.")
+                                                  "Lūdzu, pārliecinieties, ka fails 'haarcascade_frontalface_default.xml' atrodas mapē 'data' blakus programmai.")
                     return
 
                 face_cascade = cv2.CascadeClassifier(cascade_path)
@@ -6187,257 +12764,6 @@ class OCRPDFApp(ttk.Window):
 
             except Exception as e:
                 messagebox.showerror("Kļūda", f"Neizdevās veikt sejas noteikšanu: {e}")
-
-    def scan_document_with_camera(self):
-        """
-        Automātiski skenē dokumentu, izmantojot kameru, un apstrādā to.
-        Pirms kameras atvēršanas piedāvā izvēlēties kameru, ja pieejamas vairākas.
-        Pievienota manuālās atlases iespēja.
-        Uzlabota attēla apstrāde, lai labāk atpazītu dokumentus dažādos apgaismojuma apstākļos.
-        """
-        if not OPENCV_AVAILABLE:
-            messagebox.showwarning("Trūkst bibliotēkas", "Kameras skenēšanai nepieciešams 'opencv-python'.")
-            return
-
-        # Pārbauda pieejamās kameras
-        available_cameras = []
-        for i in range(10):  # Pārbauda pirmās 10 kameras
-            cap_test = cv2.VideoCapture(i, cv2.CAP_DSHOW)
-            if cap_test.isOpened():
-                available_cameras.append(i)
-                cap_test.release()
-            else:
-                pass
-
-        if not available_cameras:
-            messagebox.showerror("Kļūda", "Netika atrasta neviena pieejama kamera.")
-            return
-
-        camera_index = self.scan_settings.get("scan_camera_index", DEFAULT_CAMERA_INDEX)
-
-        if len(available_cameras) > 1:
-            choice_dialog = Toplevel(self)
-            choice_dialog.title("Izvēlēties kameru")
-            choice_dialog.transient(self)
-            choice_dialog.grab_set()
-
-            ttk.Label(choice_dialog, text="Lūdzu, izvēlieties kameru:").pack(padx=10, pady=5)
-
-            camera_options = [f"Kamera {idx}" for idx in available_cameras]
-            selected_camera_var = tk.StringVar(
-                value=f"Kamera {camera_index}" if camera_index in available_cameras else camera_options[0])
-            camera_combo = ttk.Combobox(choice_dialog, textvariable=selected_camera_var, values=camera_options,
-                                        state="readonly")
-            camera_combo.pack(padx=10, pady=5)
-
-            def confirm_camera_choice():
-                nonlocal camera_index
-                selected_text = selected_camera_var.get()
-                camera_index = int(selected_text.split(" ")[1])
-                choice_dialog.destroy()
-
-            ttk.Button(choice_dialog, text="Apstiprināt", command=confirm_camera_choice, bootstyle=PRIMARY).pack(
-                pady=10)
-            self.wait_window(choice_dialog)
-
-            if not choice_dialog.winfo_exists():
-                if camera_index not in available_cameras:
-                    camera_index = available_cameras[0]
-            else:
-                return
-
-        cap = cv2.VideoCapture(camera_index, cv2.CAP_DSHOW)
-        if not cap.isOpened():
-            messagebox.showerror("Kļūda",
-                                 f"Neizdevās atvērt kameru ar indeksu {camera_index}. Pārliecinieties, ka kamera ir pievienota un pieejama.")
-            return
-
-        # Ielādē skenēšanas iestatījumus
-        camera_width = self.scan_settings.get("scan_camera_width", 1280)
-        camera_height = self.scan_settings.get("scan_camera_height", 720)
-        min_contour_area = self.scan_settings.get("scan_min_contour_area", 10000)
-        stable_threshold = self.scan_settings.get("scan_stable_threshold", 1.5)
-        stability_tolerance = self.scan_settings.get("scan_stability_tolerance", 0.02)
-        aspect_ratio_min = self.scan_settings.get("scan_aspect_ratio_min", 0.5)
-        aspect_ratio_max = self.scan_settings.get("scan_aspect_ratio_max", 2.0)
-        gaussian_blur_kernel = self.scan_settings.get("scan_gaussian_blur_kernel", 5)
-        adaptive_thresh_block_size = self.scan_settings.get("scan_adaptive_thresh_block_size", 11)
-        adaptive_thresh_c = self.scan_settings.get("scan_adaptive_thresh_c", 2)
-        canny_thresh1 = self.scan_settings.get("scan_canny_thresh1", 75)
-        canny_thresh2 = self.scan_settings.get("scan_canny_thresh2", 200)
-
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH, camera_width)
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, camera_height)
-
-        scan_window_name = "Dokumentu skenēšana (Nospiediet 'q', lai aizvērtu, 'm' - manuālai atlasei)"
-        cv2.namedWindow(scan_window_name, cv2.WINDOW_NORMAL)
-        cv2.resizeWindow(scan_window_name, 800, 600)
-
-        document_found_time = None
-        last_contour_area = 0
-        self._camera_scan_in_progress = True
-
-        try:
-            while True:
-                ret, frame = cap.read()
-                if not ret:
-                    messagebox.showerror("Kļūda", "Neizdevās nolasīt kadru no kameras.")
-                    break
-
-                original_frame = frame.copy()
-
-                # Uzlabota priekšapstrāde:
-                # 1. Pārvērš uz HSV, lai labāk atdalītu krāsas un spilgtumu
-                hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-                # Izmantojam V (Value) kanālu, kas atspoguļo spilgtumu
-                gray = hsv[:, :, 2]
-
-                # 2. Pielieto Gausa izplūšanu, lai samazinātu troksni
-                if gaussian_blur_kernel % 2 == 0:
-                    gaussian_blur_kernel += 1  # Kernela izmēram jābūt nepāra
-                blurred = cv2.GaussianBlur(gray, (gaussian_blur_kernel, gaussian_blur_kernel), 0)
-
-                # 3. Pielieto adaptīvo sliekšņošanu, lai izceltu dokumentu neatkarīgi no fona
-                # Šī metode ir robustāka pret apgaismojuma izmaiņām
-                if adaptive_thresh_block_size % 2 == 0:
-                    adaptive_thresh_block_size += 1  # Bloka izmēram jābūt nepāra
-                if adaptive_thresh_block_size <= 1:
-                    adaptive_thresh_block_size = 3  # Minimālais bloka izmērs
-
-                # Izmantojam THRESH_BINARY_INV, lai dokuments būtu balts uz melna fona kontūru meklēšanai
-                thresh = cv2.adaptiveThreshold(blurred, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV,
-                                               adaptive_thresh_block_size, adaptive_thresh_c)
-
-                # 4. Morfoloģiskās operācijas, lai aizpildītu mazas atstarpes un savienotu kontūras
-                kernel = np.ones((5, 5), np.uint8)  # Palielināts kernela izmērs
-                morphed = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel,
-                                           iterations=3)  # Palielināts iterāciju skaits
-
-                # 5. Canny malu noteikšana
-                edged = cv2.Canny(morphed, canny_thresh1, canny_thresh2)
-
-                contours, _ = cv2.findContours(edged.copy(), cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
-                contours = sorted(contours, key=cv2.contourArea, reverse=True)
-
-                document_contour = None
-                status_text = "Meklē dokumentu..."
-
-                for c in contours:
-                    if cv2.contourArea(c) < min_contour_area:
-                        continue
-
-                    peri = cv2.arcLength(c, True)
-                    approx = cv2.approxPolyDP(c, 0.02 * peri, True)
-
-                    # Pārbauda, vai kontūrai ir 4 stūri (dokuments)
-                    if len(approx) == 4:
-                        x, y, w, h = cv2.boundingRect(approx)
-                        aspect_ratio = float(w) / h
-                        # Pārbauda malu attiecību, lai filtrētu nedokumentu objektus
-                        if aspect_ratio_min < aspect_ratio < aspect_ratio_max:
-                            document_contour = approx
-                            break
-
-                display_frame = original_frame.copy()
-                if document_contour is not None:
-                    cv2.drawContours(display_frame, [document_contour], -1, (0, 255, 0), 2)  # Zaļa kontūra
-                    current_contour_area = cv2.contourArea(document_contour)
-
-                    if document_found_time is None:
-                        document_found_time = time.time()
-                        last_contour_area = current_contour_area
-                        status_text = "Dokuments atrasts, gaida stabilitāti..."
-                    else:
-                        # Pārbauda kontūras stabilitāti
-                        if abs(current_contour_area - last_contour_area) / last_contour_area < stability_tolerance:
-                            if (time.time() - document_found_time) > stable_threshold:
-                                status_text = "Dokuments stabils! Skenē..."
-                                warped = self._four_point_transform(original_frame, document_contour.reshape(4, 2))
-
-                                # Uzlabota pēcapstrāde skenētajam attēlam:
-                                # Pārvērš uz pelēktoņiem
-                                warped_gray = cv2.cvtColor(warped, cv2.COLOR_BGR2GRAY)
-
-                                # Pielieto adaptīvo sliekšņošanu ar lielāku bloka izmēru tīrākam rezultātam
-                                # Šī ir galvenā apstrāde, lai iegūtu tīru, bināru attēlu
-                                final_processed_img_cv = cv2.adaptiveThreshold(warped_gray, 255,
-                                                                               cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-                                                                               cv2.THRESH_BINARY, 21,
-                                                                               # Lielāks bloka izmērs
-                                                                               5)  # C vērtība
-
-                                # Pārliecinās, ka fons ir balts un teksts melns (standarta OCR formāts)
-                                # Pārbauda vidējo pikseļu vērtību. Ja tā ir zema, attēls ir tumšs (melns fons, balts teksts)
-                                # un ir jāinvertē.
-                                if np.mean(final_processed_img_cv) < 128:
-                                    final_processed_img_cv = cv2.bitwise_not(final_processed_img_cv)
-
-                                # Saglabā oriģinālo krāsu attēlu
-                                original_scanned_pil_img = Image.fromarray(cv2.cvtColor(warped, cv2.COLOR_BGR2RGB))
-
-                                # Apstrādā attēlu OCR vajadzībām (pelēktoņi, adaptīvā sliekšņošana)
-                                warped_gray = cv2.cvtColor(warped, cv2.COLOR_BGR2GRAY)
-                                final_processed_img_cv = cv2.adaptiveThreshold(warped_gray, 255,
-                                                                               cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-                                                                               cv2.THRESH_BINARY, 21, 5)
-                                if np.mean(final_processed_img_cv) < 128:
-                                    final_processed_img_cv = cv2.bitwise_not(final_processed_img_cv)
-                                ocr_processed_pil_img = Image.fromarray(final_processed_img_cv)
-
-                                self.clear_files()
-                                self.images.append(
-                                    {"filepath": "camera_scan.png",
-                                     "original_img": original_scanned_pil_img,
-                                     # Šis ir krāsainais attēls PDF ģenerēšanai
-                                     "processed_img": ocr_processed_pil_img})  # Šis ir apstrādātais attēls OCR veikšanai
-                                self.file_listbox.insert(tk.END, "camera_scan.png")
-                                self.file_listbox.select_set(0)
-                                self.on_file_select()
-
-                                self.start_processing()
-                                break  # Iziet no kameras cilpas pēc veiksmīgas skenēšanas
-                            else:
-                                status_text = f"Dokuments stabils ({int(stable_threshold - (time.time() - document_found_time) + 1)}s)..."
-                        else:
-                            document_found_time = time.time()  # Atjauno laiku, ja dokuments kustas
-                            last_contour_area = current_contour_area
-                            status_text = "Dokuments kustas, gaida stabilitāti..."
-                else:
-                    document_found_time = None
-                    status_text = "Meklē dokumentu..."
-
-                cv2.putText(display_frame, status_text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
-                cv2.putText(display_frame, "Nospiediet 'm' manuālai atlasei", (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7,
-                            (0, 255, 255), 2)
-
-                cv2.imshow(scan_window_name, display_frame)
-
-                key = cv2.waitKey(1) & 0xFF
-                if key == ord('q'):
-                    break
-                elif key == ord('m'):  # Manuālās atlases režīms
-                    cv2.destroyWindow(scan_window_name)  # Aizver automātiskās skenēšanas logu
-                    # Uztver abas atgrieztās vērtības
-                    result_tuple = self._manual_document_selection(original_frame)
-                    if result_tuple:  # Pārbauda, vai atlase netika atcelta
-                        original_scanned_pil_img, ocr_processed_pil_img = result_tuple
-                        self.clear_files()
-                        self.images.append(
-                            {"filepath": "manual_scan.png",
-                             "original_img": original_scanned_pil_img,
-                             "processed_img": ocr_processed_pil_img})
-                        self.file_listbox.insert(tk.END, "manual_scan.png")
-                        self.file_listbox.select_set(0)
-                        self.on_file_select()
-                        self.start_processing()
-                    break  # Iziet no kameras cilpas pēc manuālās atlases
-
-        except Exception as e:
-            messagebox.showerror("Kļūda kameras skenēšanā", f"Radās kļūda: {e}")
-        finally:
-            cap.release()
-            cv2.destroyAllWindows()  # Nodrošina visu OpenCV logu aizvēršanu
-            self._camera_scan_in_progress = False
 
     def _manual_document_selection(self, frame):
         """
@@ -6561,27 +12887,725 @@ class OCRPDFApp(ttk.Window):
 
         return warped
 
+    def get_camera_frame_hq(self):
+        """Iegūst augstas kvalitātes kadru saglabāšanai."""
+        if self.camera is None or not self.camera_active:
+            return None
+
+        try:
+            # Izmet 2-3 kadrus, lai iegūtu jaunāko
+            for _ in range(3):
+                ret, frame = self.camera.read()
+                if not ret:
+                    return None
+
+            # Atgriež pilnu izšķirtspēju bez samazināšanas
+            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            return Image.fromarray(frame_rgb)
+        except Exception as e:
+            print(f"HQ kadra kļūda: {e}")
+            return None
+
+
 class ScanEventHandler(FileSystemEventHandler):
     """
     Apstrādā failu sistēmas notikumus, lai automātiski apstrādātu jaunus failus.
     """
+
     def __init__(self, app_instance):
         super().__init__()
+        try:
+            tesseract_path, tessdata_path = configure_tesseract()
+            print(f"Tesseract ceļš: {tesseract_path}")
+            print(f"Tessdata ceļš: {tessdata_path}")
+        except Exception as e:
+            print(f"Tesseract konfigurācijas kļūda: {e}")
         self.app = app_instance
-        self.processed_files = set() # Lai izvairītos no dubultas apstrādes
+        self.processed_files = set()  # Lai izvairītos no dubultas apstrādes
 
     def on_created(self, event):
         """Apstrādā faila izveides notikumu."""
         if not event.is_directory:
             filepath = event.src_path
             # Pārbauda, vai fails ir attēls vai PDF un nav jau apstrādāts
-            if filepath.lower().endswith(('.png', '.jpg', '.jpeg', '.tif', '.tiff', '.bmp', '.pdf')) and filepath not in self.processed_files:
+            if filepath.lower().endswith(('.png', '.jpg', '.jpeg', '.tif', '.tiff', '.bmp',
+                                          '.pdf')) and filepath not in self.processed_files:
                 self.processed_files.add(filepath)
                 # Izsauc galvenās lietotnes metodi, lai apstrādātu failu
                 self.app.after(100, lambda: self.app.process_new_scanned_file(filepath))
                 # Pēc apstrādes noņem failu no saraksta, lai to varētu apstrādāt vēlreiz, ja tas tiek modificēts/pārsūtīts
                 # Pagaida ilgāku laiku, lai nodrošinātu, ka fails ir pilnībā apstrādāts un augšupielādēts
                 self.app.after(10000, lambda: self.processed_files.discard(filepath))
+
+
+def show_document_detection_menu(self):
+    """Parāda dokumentu atlases izvēlni"""
+    from tkinter import Toplevel
+    menu_window = Toplevel(self)
+    menu_window.title("Atlasīt dokumentu no attēla")
+    menu_window.geometry("300x200")
+    menu_window.transient(self)
+    menu_window.grab_set()
+
+    # Centrē logu
+    menu_window.update_idletasks()
+    x = (menu_window.winfo_screenwidth() // 2) - (menu_window.winfo_width() // 2)
+    y = (menu_window.winfo_screenheight() // 2) - (menu_window.winfo_height() // 2)
+    menu_window.geometry(f"+{x}+{y}")
+
+    ttk.Label(menu_window, text="Izvēlieties dokumenta avotu:",
+              font=("Helvetica", 12, "bold")).pack(pady=20)
+
+    ttk.Button(menu_window, text="1. Atvērt foto no sistēmas",
+               command=lambda: self.open_photo_for_detection(menu_window),
+               bootstyle="primary").pack(pady=10, padx=20, fill="x")
+
+    ttk.Button(menu_window, text="2. Bildēt foto ar kameru",
+               command=lambda: self.capture_photo_for_detection(menu_window),
+               bootstyle="success").pack(pady=10, padx=20, fill="x")
+
+
+def open_photo_for_detection(self, parent_window):
+    """Atver foto no sistēmas dokumenta atlasei"""
+    parent_window.destroy()
+
+    filepath = filedialog.askopenfilename(
+        title="Izvēlieties foto dokumenta atlasei",
+        filetypes=[("Attēli", "*.png *.jpg *.jpeg *.tif *.tiff *.bmp"), ("Visi faili", "*.*")]
+    )
+
+    if filepath:
+        try:
+            img = Image.open(filepath)
+            self.process_image_for_document_detection(img, filepath)
+        except Exception as e:
+            messagebox.showerror("Kļūda", f"Neizdevās ielādēt attēlu: {e}")
+
+
+def capture_photo_for_detection(self, parent_window):
+    """Bildē foto ar kameru dokumenta atlasei"""
+    parent_window.destroy()
+    messagebox.showinfo("Info", "Kameras funkcija tiks pievienota nākamajā versijā")
+
+
+def process_image_for_document_detection(self, image, source_path):
+    """Apstrādā attēlu dokumenta atlasei"""
+    if not OPENCV_AVAILABLE:
+        messagebox.showwarning("Trūkst bibliotēkas",
+                               "Dokumenta atlasei nepieciešams 'opencv-python'.")
+        return
+
+    try:
+        # Konvertē uz OpenCV formātu
+        img_cv = np.array(image)
+        if len(img_cv.shape) == 3:
+            img_cv = cv2.cvtColor(img_cv, cv2.COLOR_RGB2BGR)
+
+        # Dokumenta kontūras atrašana
+        detected_corners = self.detect_document_corners(img_cv)
+
+        if detected_corners is not None:
+            # Parāda rezultātu lietotājam apstiprināšanai
+            self.show_detection_result(image, detected_corners, source_path)
+        else:
+            # Ja automātiskā atlase neizdevās, ļauj lietotājam manuāli iezīmēt
+            self.manual_corner_selection(image, source_path)
+
+    except Exception as e:
+        messagebox.showerror("Kļūda", f"Dokumenta atlases kļūda: {e}")
+
+
+def detect_document_corners(self, img_cv):
+    """Atrod dokumenta stūrus attēlā"""
+    try:
+        gray = cv2.cvtColor(img_cv, cv2.COLOR_BGR2GRAY)
+        blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+        edged = cv2.Canny(blurred, 75, 200)
+
+        contours, _ = cv2.findContours(edged, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        contours = sorted(contours, key=cv2.contourArea, reverse=True)
+
+        for contour in contours:
+            epsilon = 0.02 * cv2.arcLength(contour, True)
+            approx = cv2.approxPolyDP(contour, epsilon, True)
+
+            if len(approx) == 4 and cv2.contourArea(contour) > 10000:
+                return approx.reshape(4, 2)
+
+        return None
+    except Exception as e:
+        print(f"Dokumenta stūru atrašanas kļūda: {e}")
+        return None
+
+
+def show_detection_result(self, image, corners, source_path):
+    """Parāda dokumenta atlases rezultātu apstiprināšanai"""
+    from tkinter import Toplevel
+    result_window = Toplevel(self)
+    result_window.title("Dokumenta atlases rezultāts")
+    result_window.geometry("800x700")
+    result_window.transient(self)
+    result_window.grab_set()
+
+    # Attēla kanvass
+    canvas = tk.Canvas(result_window, bg="gray")
+    canvas.pack(fill="both", expand=True, padx=10, pady=10)
+
+    # Pogu rāmis
+    button_frame = ttk.Frame(result_window)
+    button_frame.pack(fill="x", pady=10)
+
+    # Zīmē attēlu ar iezīmētiem stūriem
+    img_with_corners = np.array(image)
+    if len(img_with_corners.shape) == 3:
+        img_cv = cv2.cvtColor(img_with_corners, cv2.COLOR_RGB2BGR)
+    else:
+        img_cv = img_with_corners
+
+    # Zīmē kontūru
+    cv2.drawContours(img_cv, [corners], -1, (0, 255, 0), 3)
+    for corner in corners:
+        cv2.circle(img_cv, tuple(corner), 10, (255, 0, 0), -1)
+
+    # Konvertē atpakaļ uz PIL
+    img_result = cv2.cvtColor(img_cv, cv2.COLOR_BGR2RGB)
+    pil_result = Image.fromarray(img_result)
+
+    # Parāda kanvasā
+    def show_image():
+        result_window.update_idletasks()
+        canvas_width = canvas.winfo_width()
+        canvas_height = canvas.winfo_height()
+
+        if canvas_width > 1 and canvas_height > 1:
+            display_img = pil_result.resize((canvas_width - 20, canvas_height - 20), Image.LANCZOS)
+            photo = ImageTk.PhotoImage(display_img)
+            canvas.create_image(10, 10, anchor="nw", image=photo)
+            canvas.image = photo
+
+    result_window.after(100, show_image)
+
+    def accept_detection():
+        result_window.destroy()
+        self.process_detected_document(image, corners, source_path)
+
+    def manual_selection():
+        result_window.destroy()
+        self.manual_corner_selection(image, source_path)
+
+    ttk.Label(result_window, text="Vai dokumenta atlase izskatās pareiza?",
+              font=("Helvetica", 12)).pack(pady=5)
+
+    ttk.Button(button_frame, text="Jā, izskatās labi", command=accept_detection,
+               bootstyle="success").pack(side="left", padx=10)
+    ttk.Button(button_frame, text="Nē, izvēlēšos pats", command=manual_selection,
+               bootstyle="warning").pack(side="left", padx=10)
+    ttk.Button(button_frame, text="Atcelt", command=result_window.destroy,
+               bootstyle="danger").pack(side="left", padx=10)
+
+
+def manual_corner_selection(self, image, source_path):
+    """Ļauj lietotājam manuāli izvēlēties dokumenta stūrus"""
+    from tkinter import Toplevel
+    manual_window = Toplevel(self)
+    manual_window.title("Manuāla dokumenta atlase")
+    manual_window.geometry("900x700")
+    manual_window.transient(self)
+    manual_window.grab_set()
+
+    canvas = tk.Canvas(manual_window, bg="gray", cursor="cross")
+    canvas.pack(fill="both", expand=True, padx=10, pady=10)
+
+    instruction_frame = ttk.Frame(manual_window)
+    instruction_frame.pack(fill="x", pady=5)
+
+    ttk.Label(instruction_frame,
+              text="Noklikšķiniet uz 4 dokumenta stūriem secībā: augšā pa kreisi, augšā pa labi, apakšā pa labi, apakšā pa kreisi",
+              font=("Helvetica", 10)).pack()
+
+    button_frame = ttk.Frame(manual_window)
+    button_frame.pack(fill="x", pady=5)
+
+    selected_corners = []
+    corner_circles = []
+    scale_x = scale_y = 1.0
+
+    def show_image():
+        nonlocal scale_x, scale_y
+        manual_window.update_idletasks()
+        canvas_width = canvas.winfo_width()
+        canvas_height = canvas.winfo_height()
+
+        if canvas_width > 1 and canvas_height > 1:
+            display_img = image.resize((canvas_width - 20, canvas_height - 20), Image.LANCZOS)
+            photo = ImageTk.PhotoImage(display_img)
+            canvas.create_image(10, 10, anchor="nw", image=photo)
+            canvas.image = photo
+
+            # Aprēķina mērogošanas faktoru
+            scale_x = (canvas_width - 20) / image.width
+            scale_y = (canvas_height - 20) / image.height
+
+    manual_window.after(100, show_image)
+
+    def on_canvas_click(event):
+        if len(selected_corners) < 4:
+            x = event.x - 10
+            y = event.y - 10
+
+            # Pārveido uz oriģinālā attēla koordinātām
+            orig_x = int(x / scale_x) if scale_x > 0 else x
+            orig_y = int(y / scale_y) if scale_y > 0 else y
+
+            selected_corners.append([orig_x, orig_y])
+
+            # Zīmē apli uz kanvasa
+            circle = canvas.create_oval(x - 5, y - 5, x + 5, y + 5, fill="red", outline="white", width=2)
+            corner_circles.append(circle)
+
+            # Zīmē numuru
+            canvas.create_text(x, y - 15, text=str(len(selected_corners)), fill="white", font=("Arial", 12, "bold"))
+
+            if len(selected_corners) == 4:
+                # Aktivizē apstrādes pogu
+                process_btn.config(state="normal")
+
+    def reset_selection():
+        selected_corners.clear()
+        for circle in corner_circles:
+            canvas.delete(circle)
+        corner_circles.clear()
+        canvas.delete("text")
+        process_btn.config(state="disabled")
+
+    def process_manual_selection():
+        if len(selected_corners) == 4:
+            manual_window.destroy()
+            corners_array = np.array(selected_corners, dtype=np.float32)
+            self.process_detected_document(image, corners_array, source_path)
+
+    # Pievieno klikšķa notikumu
+    canvas.bind("<Button-1>", on_canvas_click)
+
+    # Pogas
+    ttk.Button(button_frame, text="Atiestatīt", command=reset_selection,
+               bootstyle="warning").pack(side="left", padx=5)
+
+    process_btn = ttk.Button(button_frame, text="Apstrādāt dokumentu",
+                             command=process_manual_selection,
+                             bootstyle="success", state="disabled")
+    process_btn.pack(side="left", padx=5)
+
+    ttk.Button(button_frame, text="Atcelt", command=manual_window.destroy,
+               bootstyle="danger").pack(side="left", padx=5)
+
+
+def process_detected_document(self, image, corners, source_path):
+    """Apstrādā dokumentu pēc stūru noteikšanas"""
+    try:
+        # Vienkāršots risinājums - vienkārši ielādē attēlu programmā
+        self.current_image = image
+        self.current_image_path = source_path
+        self.original_image = image.copy()
+
+        # Atjaunina attēla parādīšanu
+        self.display_image()
+
+        # Pārslēdzas uz attēla apstrādes cilni
+        self.notebook.select(self.image_processing_tab)
+
+        messagebox.showinfo("Sekmīgi", "Dokuments veiksmīgi ielādēts!")
+
+    except Exception as e:
+        messagebox.showerror("Kļūda", f"Dokumenta apstrādes kļūda: {e}")
+
+
+def order_corners(self, corners):
+    """Sakārto stūrus pareizā secībā"""
+    # Aprēķina centru
+    center_x = np.mean(corners[:, 0])
+    center_y = np.mean(corners[:, 1])
+
+    # Klasificē stūrus pēc pozīcijas attiecībā pret centru
+    top_left = None
+    top_right = None
+    bottom_right = None
+    bottom_left = None
+
+    for corner in corners:
+        x, y = corner
+        if x < center_x and y < center_y:
+            top_left = corner
+        elif x > center_x and y < center_y:
+            top_right = corner
+        elif x > center_x and y > center_y:
+            bottom_right = corner
+        elif x < center_x and y > center_y:
+            bottom_left = corner
+
+    # Ja kāds stūris nav atrasts, izmanto tuvāko
+    ordered_corners = []
+    for target_corner in [top_left, top_right, bottom_right, bottom_left]:
+        if target_corner is not None:
+            ordered_corners.append(target_corner)
+        else:
+            # Atrod tuvāko neizmantoto stūri
+            remaining_corners = [c for c in corners if not any(np.array_equal(c, oc) for oc in ordered_corners)]
+            if remaining_corners:
+                ordered_corners.append(remaining_corners[0])
+
+    return np.array(ordered_corners, dtype=np.float32)
+
+
+def correct_perspective(self, img, corners):
+    """Veic perspektīvas korekciju"""
+    try:
+        # Aprēķina jauno attēla izmēru
+        width_top = np.linalg.norm(corners[1] - corners[0])
+        width_bottom = np.linalg.norm(corners[2] - corners[3])
+        width = int(max(width_top, width_bottom))
+
+        height_left = np.linalg.norm(corners[3] - corners[0])
+        height_right = np.linalg.norm(corners[2] - corners[1])
+        height = int(max(height_left, height_right))
+
+        # Mērķa punkti (taisnstūris)
+        dst_corners = np.array([
+            [0, 0],
+            [width, 0],
+            [width, height],
+            [0, height]
+        ], dtype=np.float32)
+
+        # Perspektīvas transformācijas matrica
+        matrix = cv2.getPerspectiveTransform(corners, dst_corners)
+
+        # Veic transformāciju
+        corrected = cv2.warpPerspective(img, matrix, (width, height))
+
+        return corrected
+
+    except Exception as e:
+        print(f"Perspektīvas korekcijas kļūda: {e}")
+        return None
+
+
+def load_processed_image(self, image, source_path):
+    """Ielādē apstrādāto attēlu programmā"""
+    try:
+        # Saglabā attēlu pagaidu failā
+        import tempfile
+        import os
+
+        temp_dir = tempfile.gettempdir()
+        temp_filename = f"processed_document_{int(time.time())}.png"
+        temp_path = os.path.join(temp_dir, temp_filename)
+
+        image.save(temp_path, "PNG")
+
+        # Ielādē attēlu programmā (izmanto esošo funkcionalitāti)
+        self.current_image = image
+        self.current_image_path = temp_path
+        self.original_image = image.copy()
+
+        # Atjaunina attēla parādīšanu
+        self.display_image()
+
+        # Pārslēdzas uz attēla apstrādes cilni
+        self.notebook.select(self.image_processing_tab)
+
+    except Exception as e:
+        messagebox.showerror("Kļūda", f"Neizdevās ielādēt apstrādāto attēlu: {e}")
+
+
+def try_detect_document_method1(img_cv):
+    """1. metode: Uzlabota adaptīvā sliekšņošana"""
+    try:
+        gray = cv2.cvtColor(img_cv, cv2.COLOR_RGB2GRAY)
+
+        # Uzlabo kontrastu
+        clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
+        enhanced = clahe.apply(gray)
+
+        # Gausa izplūšana
+        blurred = cv2.GaussianBlur(enhanced, (5, 5), 0)
+
+        # Adaptīvā sliekšņošana ar dažādiem parametriem
+        for block_size in [11, 15, 19, 23]:
+            for c_value in [2, 5, 10]:
+                thresh = cv2.adaptiveThreshold(blurred, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                                               cv2.THRESH_BINARY, block_size, c_value)
+
+                contour = find_best_contour(thresh, img_cv.shape)
+                if contour is not None:
+                    return contour
+
+        return None
+    except:
+        return None
+
+
+def try_detect_document_method2(img_cv):
+    """2. metode: Canny edge detection"""
+    try:
+        gray = cv2.cvtColor(img_cv, cv2.COLOR_RGB2GRAY)
+
+        # Uzlabo kontrastu
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        enhanced = clahe.apply(gray)
+
+        # Gausa izplūšana
+        blurred = cv2.GaussianBlur(enhanced, (5, 5), 0)
+
+        # Canny edge detection ar dažādiem sliekšņiem
+        for low_thresh in [50, 75, 100]:
+            for high_thresh in [150, 200, 250]:
+                edges = cv2.Canny(blurred, low_thresh, high_thresh)
+
+                # Morfoloģiskās operācijas, lai aizvērtu pārtraukumus
+                kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+                edges = cv2.morphologyEx(edges, cv2.MORPH_CLOSE, kernel)
+
+                contour = find_best_contour(edges, img_cv.shape)
+                if contour is not None:
+                    return contour
+
+        return None
+    except:
+        return None
+
+
+def try_detect_document_method3(img_cv):
+    """3. metode: Morfoloģiskās operācijas"""
+    try:
+        gray = cv2.cvtColor(img_cv, cv2.COLOR_RGB2GRAY)
+
+        # Binārizācija ar Otsu metodi
+        _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+
+        # Morfoloģiskās operācijas
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
+
+        # Closing - aizvērt mazos caurums
+        closed = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel, iterations=2)
+
+        # Opening - noņemt troksni
+        opened = cv2.morphologyEx(closed, cv2.MORPH_OPEN, kernel, iterations=1)
+
+        contour = find_best_contour(opened, img_cv.shape)
+        if contour is not None:
+            return contour
+
+        # Mēģinam ar invertētu attēlu
+        inverted = cv2.bitwise_not(opened)
+        contour = find_best_contour(inverted, img_cv.shape)
+        return contour
+
+    except:
+        return None
+
+
+def try_detect_document_method4(img_cv):
+    """4. metode: Krāsu segmentācija"""
+    try:
+        # Konvertē uz HSV krāsu telpu
+        hsv = cv2.cvtColor(img_cv, cv2.COLOR_RGB2HSV)
+
+        # Definē baltās krāsas diapazonu (dokumenti bieži ir balti)
+        lower_white = np.array([0, 0, 180])
+        upper_white = np.array([180, 30, 255])
+
+        # Izveido masku baltajām krāsām
+        white_mask = cv2.inRange(hsv, lower_white, upper_white)
+
+        # Morfoloģiskās operācijas
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
+        white_mask = cv2.morphologyEx(white_mask, cv2.MORPH_CLOSE, kernel, iterations=2)
+        white_mask = cv2.morphologyEx(white_mask, cv2.MORPH_OPEN, kernel, iterations=1)
+
+        contour = find_best_contour(white_mask, img_cv.shape)
+        if contour is not None:
+            return contour
+
+        # Mēģinam ar plašāku krāsu diapazonu
+        lower_light = np.array([0, 0, 120])
+        upper_light = np.array([180, 50, 255])
+        light_mask = cv2.inRange(hsv, lower_light, upper_light)
+
+        light_mask = cv2.morphologyEx(light_mask, cv2.MORPH_CLOSE, kernel, iterations=2)
+        contour = find_best_contour(light_mask, img_cv.shape)
+        return contour
+
+    except:
+        return None
+
+
+def find_best_contour(binary_img, img_shape):
+    """Atrod labāko kontūru, kas varētu būt dokuments"""
+    try:
+        contours, _ = cv2.findContours(binary_img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+        if not contours:
+            return None
+
+        img_area = img_shape[0] * img_shape[1]
+
+        # Sakārto kontūras pēc laukuma
+        contours = sorted(contours, key=cv2.contourArea, reverse=True)
+
+        for contour in contours:
+            area = cv2.contourArea(contour)
+
+            # Pārbauda minimālo laukumu (vismaz 5% no attēla)
+            if area < img_area * 0.05:
+                continue
+
+            # Pārbauda maksimālo laukumu (ne vairāk kā 95% no attēla)
+            if area > img_area * 0.95:
+                continue
+
+            # Aproksimē kontūru
+            peri = cv2.arcLength(contour, True)
+
+            # Mēģina ar dažādiem epsilon parametriem
+            for epsilon_factor in [0.01, 0.02, 0.03, 0.04, 0.05]:
+                approx = cv2.approxPolyDP(contour, epsilon_factor * peri, True)
+
+                # Ja ir 4 stūri
+                if len(approx) == 4:
+                    # Pārbauda, vai stūri veido saprātīgu taisnstūri
+                    if is_valid_rectangle(approx, img_shape):
+                        return approx
+
+                # Ja ir vairāk nekā 4 stūri, mēģina atrast 4 galvenos
+                elif len(approx) > 4:
+                    # Atrod 4 galvenos stūrus
+                    rect_corners = find_four_corners(approx)
+                    if rect_corners is not None and is_valid_rectangle(rect_corners, img_shape):
+                        return rect_corners
+
+        return None
+    except:
+        return None
+
+
+def is_valid_rectangle(corners, img_shape):
+    """Pārbauda, vai 4 punkti veido derīgu taisnstūri"""
+    try:
+        if len(corners) != 4:
+            return False
+
+        # Pārbauda, vai visi punkti ir attēla robežās
+        h, w = img_shape[:2]
+        for corner in corners:
+            x, y = corner[0]
+            if x < 0 or x >= w or y < 0 or y >= h:
+                return False
+
+        # Aprēķina laukumu
+        area = cv2.contourArea(corners)
+        img_area = h * w
+
+        # Pārbauda laukuma attiecību
+        if area < img_area * 0.05 or area > img_area * 0.95:
+            return False
+
+        # Pārbauda, vai forma ir pietiekami taisnstūrveida
+        # Aprēķina convex hull un salīdzina laukumus
+        hull = cv2.convexHull(corners)
+        hull_area = cv2.contourArea(hull)
+
+        if hull_area > 0:
+            solidity = area / hull_area
+            if solidity < 0.8:  # Ja forma nav pietiekami "cieta"
+                return False
+
+        return True
+    except:
+        return False
+
+
+def find_four_corners(contour):
+    """Atrod 4 galvenos stūrus no kontūras ar vairāk punktiem"""
+    try:
+        # Atrod kontūras bounding rectangle
+        rect = cv2.minAreaRect(contour)
+        box = cv2.boxPoints(rect)
+        box = np.int0(box)
+
+        return box.reshape(4, 1, 2)
+    except:
+        return None
+
+
+def apply_perspective_transform(img_cv, document_contour):
+    """Pielieto perspektīvas transformāciju"""
+    try:
+        def order_points(pts):
+            """Sakārto punktus: augšējais kreisais, augšējais labais, apakšējais labais, apakšējais kreisais"""
+            rect = np.zeros((4, 2), dtype="float32")
+
+            # Summa: augšējais kreisais būs mazākā, apakšējais labais - lielākā
+            s = pts.sum(axis=1)
+            rect[0] = pts[np.argmin(s)]  # Augšējais kreisais
+            rect[2] = pts[np.argmax(s)]  # Apakšējais labais
+
+            # Starpība: augšējais labais būs mazākā, apakšējais kreisais - lielākā
+            diff = np.diff(pts, axis=1)
+            rect[1] = pts[np.argmin(diff)]  # Augšējais labais
+            rect[3] = pts[np.argmax(diff)]  # Apakšējais kreisais
+
+            return rect
+
+        # Sakārto stūrus
+        corners = document_contour.reshape(4, 2)
+        ordered_corners = order_points(corners)
+
+        # Aprēķina jaunā attēla izmērus
+        (tl, tr, br, bl) = ordered_corners
+
+        # Platums
+        widthA = np.sqrt(((br[0] - bl[0]) ** 2) + ((br[1] - bl[1]) ** 2))
+        widthB = np.sqrt(((tr[0] - tl[0]) ** 2) + ((tr[1] - tl[1]) ** 2))
+        maxWidth = max(int(widthA), int(widthB))
+
+        # Augstums
+        heightA = np.sqrt(((tr[0] - br[0]) ** 2) + ((tr[1] - br[1]) ** 2))
+        heightB = np.sqrt(((tl[0] - bl[0]) ** 2) + ((tl[1] - bl[1]) ** 2))
+        maxHeight = max(int(heightA), int(heightB))
+
+        # Pārbauda, vai izmēri ir saprātīgi
+        if maxWidth < 50 or maxHeight < 50:
+            print("Pārāk mazi izmēri")
+            return None
+
+        if maxWidth > 5000 or maxHeight > 5000:
+            # Ierobežo maksimālos izmērus
+            ratio = min(5000 / maxWidth, 5000 / maxHeight)
+            maxWidth = int(maxWidth * ratio)
+            maxHeight = int(maxHeight * ratio)
+
+        # Definē mērķa punktus (taisnstūrveida dokuments)
+        dst = np.array([
+            [0, 0],
+            [maxWidth - 1, 0],
+            [maxWidth - 1, maxHeight - 1],
+            [0, maxHeight - 1]], dtype="float32")
+
+        # Aprēķina perspektīvas transformācijas matricu
+        M = cv2.getPerspectiveTransform(ordered_corners, dst)
+
+        # Pielieto perspektīvas transformāciju
+        warped = cv2.warpPerspective(img_cv, M, (maxWidth, maxHeight))
+
+        # Konvertē atpakaļ uz PIL attēlu
+        processed_img_pil = Image.fromarray(warped)
+
+        return processed_img_pil
+
+    except Exception as e:
+        print(f"Kļūda perspektīvas transformācijā: {e}")
+        return None
 
 
 if __name__ == "__main__":
@@ -6592,7 +13616,7 @@ if __name__ == "__main__":
         from docx import Document  # Priekš Word dokumentiem
     except ImportError as e:
         messagebox.showwarning("Trūkst bibliotēku", f"Dažas nepieciešamās bibliotēkas nav instalētas: {str(e)}\n"
-                                  "Lūdzu, instalējiet trūkstošās bibliotēkas (pip install pillow python-docx).")
+                                                    "Lūdzu, instalējiet trūkstošās bibliotēkas (pip install pillow python-docx).")
     # Palaiž galveno lietotni
     app = OCRPDFApp()
     app.protocol("WM_DELETE_WINDOW", app.on_closing)
